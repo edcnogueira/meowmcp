@@ -69,6 +69,35 @@ agent runs; messages received meanwhile are delivered by WhatsApp on the next co
 reconnect on every agent start. Only one process may use a session at a time; a second one makes the
 first go `disconnected` ("another process connected").
 
+## Deploy (Docker)
+
+CI (`.github/workflows/ci.yml`) tests every push and publishes a multi-arch image to
+`ghcr.io/edcnogueira/meowmcp`: `main` and `sha-<7 chars>` on every push to `main`, `X.Y.Z`, `X.Y` and
+`latest` on `vX.Y.Z` tags. The image runs the http transport on `0.0.0.0:8484` with data in `/data`,
+so `MEOWMCP_AUTH_TOKEN` is mandatory.
+
+`deploy/compose.yaml` publishes the port on `127.0.0.1:8484` only, runs as your server user and
+bind-mounts `<deploy dir>/data` at the same absolute path inside the container, so the `qr.png` path
+returned by `login` is readable by Hermes on the host (and sendable as a `MEDIA:` attachment). The data
+dir survives updates; deleting it unlinks the device.
+
+From your machine, once CI for the pushed commit is green:
+
+```sh
+make deploy                    # install or update to :main
+make deploy TAG=sha-1a2b3c4    # pin a commit / roll back
+make deploy TAG=0.2.0          # pin a release
+```
+
+`deploy/deploy.sh` (host `MEOWMCP_DEPLOY_HOST`, default `edchomelab.local`; dir `MEOWMCP_DEPLOY_DIR`,
+default `~/services/meowmcp`) copies `compose.yaml`, generates `MEOWMCP_AUTH_TOKEN` in the server-side
+`.env` on first run, mirrors it into `~/.hermes/.env`, records `MEOWMCP_TAG`, the data dir and your
+uid/gid, pulls and restarts. Optional `.env` keys: `MEOWMCP_PORT`, `MEOWMCP_LOG_LEVEL`. Logs:
+`docker compose logs -f` in the deploy dir.
+
+First install also needs the `mcp_servers` entry below in `~/.hermes/config.yaml`, then
+`systemctl --user restart hermes-gateway`.
+
 ## Hermes Agent
 
 `~/.hermes/config.yaml`:

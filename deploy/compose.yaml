@@ -1,0 +1,25 @@
+# Managed by deploy/deploy.sh: copied to the server on every deploy. Server-local values live in the
+# .env file next to it (MEOWMCP_AUTH_TOKEN, MEOWMCP_TAG, MEOWMCP_DATA_DIR, MEOWMCP_UID/GID).
+name: meowmcp
+
+services:
+  meowmcp:
+    image: ghcr.io/edcnogueira/meowmcp:${MEOWMCP_TAG:-main}
+    restart: unless-stopped
+    # Host user, so files in the data dir (qr.png included) are readable by Hermes running as that user.
+    user: "${MEOWMCP_UID:?}:${MEOWMCP_GID:?}"
+    environment:
+      MEOWMCP_AUTH_TOKEN: ${MEOWMCP_AUTH_TOKEN:?set MEOWMCP_AUTH_TOKEN in .env}
+      MEOWMCP_DATA_DIR: ${MEOWMCP_DATA_DIR:?}
+      MEOWMCP_LOG_LEVEL: ${MEOWMCP_LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${MEOWMCP_PORT:-8484}:8484"
+    volumes:
+      # Same absolute path inside and outside: paths returned by tools (login -> qr.png) resolve on the host.
+      # Holds session.db (WhatsApp keys, treat as a password) and messages.db; survives updates.
+      - ${MEOWMCP_DATA_DIR:?}:${MEOWMCP_DATA_DIR:?}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

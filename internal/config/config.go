@@ -20,6 +20,14 @@ type Config struct {
 	AuthToken string
 	DataDir   string
 	LogLevel  string
+	STT       STTConfig
+}
+
+type STTConfig struct {
+	BaseURL  string
+	APIKey   string
+	Model    string
+	Language string
 }
 
 func Load(args []string) (Config, error) {
@@ -35,6 +43,10 @@ func Load(args []string) (Config, error) {
 	fs.StringVar(&cfg.AuthToken, "auth-token", os.Getenv("MEOWMCP_AUTH_TOKEN"), "bearer token required by the http transport (env MEOWMCP_AUTH_TOKEN)")
 	fs.StringVar(&cfg.DataDir, "data-dir", envOr("MEOWMCP_DATA_DIR", defaultDataDir), "directory for the session and message databases (env MEOWMCP_DATA_DIR)")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOr("MEOWMCP_LOG_LEVEL", "info"), "log level: debug, info, warn, error (env MEOWMCP_LOG_LEVEL)")
+	fs.StringVar(&cfg.STT.BaseURL, "stt-url", envOr("MEOWMCP_STT_URL", "https://api.groq.com/openai/v1"), "OpenAI-compatible base URL for voice transcription (env MEOWMCP_STT_URL)")
+	fs.StringVar(&cfg.STT.APIKey, "stt-api-key", os.Getenv("MEOWMCP_STT_API_KEY"), "API key for voice transcription; empty disables it (env MEOWMCP_STT_API_KEY)")
+	fs.StringVar(&cfg.STT.Model, "stt-model", envOr("MEOWMCP_STT_MODEL", "whisper-large-v3-turbo"), "transcription model (env MEOWMCP_STT_MODEL)")
+	fs.StringVar(&cfg.STT.Language, "stt-language", os.Getenv("MEOWMCP_STT_LANGUAGE"), "ISO-639-1 language hint, e.g. pt; empty auto-detects (env MEOWMCP_STT_LANGUAGE)")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}

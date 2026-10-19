@@ -114,6 +114,36 @@ var _ = Describe("Repository", func() {
 		Expect(msgs[0].Text).To(Equal("100% confirmado"))
 	})
 
+	It("keeps a message's media reference when a later save of the same message carries none", func() {
+		jid, ref := newJID(), []byte(gofakeit.LetterN(32))
+		m := domain.Message{ID: gofakeit.UUID(), ChatJID: jid, Timestamp: at(0), MediaType: "image", MediaRef: ref}
+		Expect(repo.SaveMessages(ctx, []domain.Message{m})).To(Succeed())
+
+		By("saving the same message again without a reference, as a history sync may")
+		m.MediaRef, m.Text = nil, gofakeit.Sentence(3)
+		Expect(repo.SaveMessages(ctx, []domain.Message{m})).To(Succeed())
+
+		got, err := repo.GetMedia(ctx, []string{jid}, m.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.MediaRef).To(Equal(ref))
+		Expect(got.Text).To(Equal(m.Text))
+	})
+
+	It("finds voice notes by their transcript and keeps it across re-saves", func() {
+		jid, word := newJID(), gofakeit.LetterN(12)
+		voice := domain.Message{ID: gofakeit.UUID(), ChatJID: jid, Timestamp: at(0), MediaType: "voice"}
+		Expect(repo.SaveMessages(ctx, []domain.Message{voice})).To(Succeed())
+		Expect(repo.SetTranscript(ctx, []string{jid}, voice.ID, "consulta "+word+" amanhã")).To(Succeed())
+		Expect(repo.SaveMessages(ctx, []domain.Message{voice})).To(Succeed())
+
+		msgs, err := repo.ListMessages(ctx, &messagesrepo.ListMessagesRequest{Query: word, Limit: 10})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(msgs).To(HaveLen(1))
+		Expect(msgs[0].ID).To(Equal(voice.ID))
+		Expect(msgs[0].Transcript).To(ContainSubstring(word))
+	})
+
 	It("reopens an existing database without re-running migrations", func() {
 		jid := newJID()
 		Expect(repo.UpsertChat(ctx, domain.Chat{JID: jid})).To(Succeed())

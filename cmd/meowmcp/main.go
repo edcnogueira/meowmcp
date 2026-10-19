@@ -18,6 +18,7 @@ import (
 
 	"github.com/edcnogueira/meowmcp/internal/config"
 	"github.com/edcnogueira/meowmcp/internal/logging"
+	"github.com/edcnogueira/meowmcp/internal/providers/sttprovider"
 	"github.com/edcnogueira/meowmcp/internal/providers/whatsappprovider"
 	"github.com/edcnogueira/meowmcp/internal/repositories/messagesrepo"
 	"github.com/edcnogueira/meowmcp/internal/service/whatsappservice"
@@ -77,7 +78,16 @@ func run(ctx context.Context, cfg config.Config, logger *zap.Logger) error {
 		}
 	}()
 
-	service := whatsappservice.New(wa, messages)
+	var transcriber whatsappservice.Transcriber
+	if cfg.STT.APIKey != "" {
+		transcriber = sttprovider.New(sttprovider.Config{
+			BaseURL:  cfg.STT.BaseURL,
+			APIKey:   cfg.STT.APIKey,
+			Model:    cfg.STT.Model,
+			Language: cfg.STT.Language,
+		})
+	}
+	service := whatsappservice.New(wa, messages, transcriber, filepath.Join(cfg.DataDir, "media"))
 	wa.SetUpdateHandler(service.HandleUpdate)
 	wa.Start(ctx)
 
@@ -86,6 +96,7 @@ func run(ctx context.Context, cfg config.Config, logger *zap.Logger) error {
 		zap.String("version", version),
 		zap.String("transport", cfg.Transport),
 		zap.String("data_dir", cfg.DataDir),
+		zap.Bool("transcription", transcriber != nil),
 		zap.String("whatsapp_state", service.Status().State.String()))
 
 	switch cfg.Transport {

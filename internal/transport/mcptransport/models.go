@@ -40,7 +40,8 @@ type messageOutput struct {
 	FromMe     bool   `json:"from_me" jsonschema:"true when sent by the logged-in user"`
 	Timestamp  string `json:"timestamp"`
 	Text       string `json:"text,omitempty"`
-	MediaType  string `json:"media_type,omitempty" jsonschema:"set for non-text messages: image, video, audio, voice, document, sticker, location, contact, poll, buttons, list, interactive"`
+	MediaType  string `json:"media_type,omitempty" jsonschema:"set for non-text messages: image, video, audio, voice, document, sticker, location, contact, poll, buttons, list, interactive. For image, sticker, voice, audio, video and document call get_media to see or transcribe the content"`
+	Transcript string `json:"transcript,omitempty" jsonschema:"speech-to-text of a voice/audio message, present once get_media has transcribed it"`
 	ReplyToID  string `json:"reply_to_id,omitempty" jsonschema:"ID of the quoted message"`
 }
 
@@ -120,6 +121,7 @@ func toMessageOutput(m domain.Message) messageOutput {
 		Text:       m.Text,
 		MediaType:  m.MediaType,
 		ReplyToID:  m.QuotedID,
+		Transcript: m.Transcript,
 	}
 }
 

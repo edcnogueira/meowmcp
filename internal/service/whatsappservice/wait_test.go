@@ -44,7 +44,7 @@ var _ = Describe("WaitForMessages", func() {
 			pnJID:  gofakeit.Numerify("55119########") + "@s.whatsapp.net",
 			lidJID: gofakeit.Numerify("###############") + "@lid",
 		}
-		service = whatsappservice.New(wa, repo)
+		service = whatsappservice.New(wa, repo, nil, GinkgoT().TempDir())
 	})
 
 	message := func(chat string, fromMe bool, ts time.Time) domain.Message {

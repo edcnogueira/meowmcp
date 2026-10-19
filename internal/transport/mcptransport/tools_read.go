@@ -68,13 +68,13 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_messages",
-		Description: "Read the messages of one chat, returned oldest to newest. Media is described by media_type plus caption/file name; media content is not downloaded.",
+		Description: "Read the messages of one chat, returned oldest to newest. Media is described by media_type plus caption/file name; call get_media to see an image or download a voice note (transcribe=true for its text).",
 		Annotations: readOnly,
 	}, t.getMessages)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search_messages",
-		Description: "Search message text across all chats or within one chat.",
+		Description: "Search message text (and voice-note transcripts) across all chats or within one chat.",
 		Annotations: readOnly,
 	}, t.searchMessages)
 
@@ -89,6 +89,14 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 		Description: "Check whether phone numbers have WhatsApp accounts and get their chat JIDs (and verified business names). Use before contacting a new number, e.g. a clinic.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
 	}, t.checkNumbers)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_media",
+		Description: "Download the attachment of one message (image, sticker, voice, audio, video, document): images are returned for you to see, every type returns file_path, a local copy you can share with the user by path. " +
+			"Voice notes and audio are only transcribed to text when transcribe=true, which sends the audio to the server's speech-to-text API. " +
+			"Downloads and transcripts are cached, so repeated calls are cheap.",
+		Annotations: &mcp.ToolAnnotations{Title: "Get WhatsApp media", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
+	}, t.getMedia)
 }
 
 func (t *Transport) listChats(ctx context.Context, _ *mcp.CallToolRequest, in listChatsInput) (*mcp.CallToolResult, listChatsOutput, error) {

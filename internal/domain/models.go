@@ -47,6 +47,8 @@ type Message struct {
 	Text       string
 	MediaType  string
 	QuotedID   string
+	Transcript string
+	MediaRef   []byte
 }
 
 type Contact struct {

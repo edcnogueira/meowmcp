@@ -108,3 +108,32 @@ var _ = Describe("ParseChatJID", func() {
 		Expect(err).To(MatchError(domain.ErrInvalidRecipient))
 	})
 })
+
+var _ = Describe("MediaRef", func() {
+	It("keeps what is needed to download an attachment and drops thumbnails and quoted context", func() {
+		directPath, mediaKey := "/v/t62/"+gofakeit.LetterN(20), []byte(gofakeit.LetterN(32))
+		msg := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+			DirectPath:    proto.String(directPath),
+			MediaKey:      mediaKey,
+			Mimetype:      proto.String("image/jpeg"),
+			JPEGThumbnail: []byte(gofakeit.LetterN(4096)),
+			ContextInfo:   &waE2E.ContextInfo{QuotedMessage: &waE2E.Message{Conversation: proto.String(gofakeit.Paragraph(3, 5, 20, " "))}},
+		}}
+
+		ref := whatsappprovider.MediaRef(msg)
+
+		var decoded waE2E.Message
+		Expect(proto.Unmarshal(ref, &decoded)).To(Succeed())
+		Expect(decoded.GetImageMessage().GetDirectPath()).To(Equal(directPath))
+		Expect(decoded.GetImageMessage().GetMediaKey()).To(Equal(mediaKey))
+		Expect(decoded.GetImageMessage().GetJPEGThumbnail()).To(BeEmpty())
+		Expect(decoded.GetImageMessage().GetContextInfo()).To(BeNil())
+		Expect(msg.GetImageMessage().GetJPEGThumbnail()).NotTo(BeEmpty(), "the original message must not be modified")
+		Expect(whatsappprovider.MediaMimeType(ref)).To(Equal("image/jpeg"))
+	})
+
+	It("is empty for messages without a downloadable attachment", func() {
+		Expect(whatsappprovider.MediaRef(&waE2E.Message{Conversation: proto.String(gofakeit.Sentence(3))})).To(BeNil())
+		Expect(whatsappprovider.MediaRef(&waE2E.Message{LocationMessage: &waE2E.LocationMessage{}})).To(BeNil())
+	})
+})

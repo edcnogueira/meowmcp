@@ -26,11 +26,12 @@ chats, search history, reply, start new conversations with any number and wait f
 | `search_contacts` | Address book + known chats by name, business name or number |
 | `check_numbers` | Which numbers are on WhatsApp, their JIDs and verified business names |
 | `send_message` | Sends text to a phone number or JID (starts new conversations too); optional quote-reply |
+| `send_file` | Sends a photo, video, audio, voice note or any document (with optional caption) from a server-side `file_path` or `data_base64`; optional quote-reply |
 | `wait_for_reply` | Blocks until the other side answers (or timeout), returning burst messages together |
 | `mark_as_read` | Sends read receipts for a chat |
 
 Read-only tools carry `readOnlyHint`, so clients that gate write actions (e.g. Hermes `trust: untrusted`)
-ask for approval only for `login`, `logout`, `send_message` and `mark_as_read`.
+ask for approval only for `login`, `logout`, `send_message`, `send_file` and `mark_as_read`.
 
 Listings describe media by `media_type` + caption/file name; `get_media` fetches the content on demand.
 Downloads land in `<data-dir>/media/<chat>/` and transcripts are stored with the message, so both happen
@@ -38,6 +39,13 @@ once per message and transcripts then show up in `get_messages` and `search_mess
 and video/documents are returned by path only. Media WhatsApp no longer serves (old history) fails with a
 request to ask the sender to resend. Business messages with buttons or lists include their options in
 `text` so the agent can pick one.
+
+`send_file` picks the WhatsApp type from the file extension (content sniffing without one): JPEG/PNG go as
+image, MP4/3GP as video, audio files as audio, anything else as a document; `send_as` overrides it
+(`document` sends a photo uncompressed, `voice` turns an OGG/Opus file into a voice note). Files are capped
+at 100 MB. `file_path` is read on the server host, so with the Docker deploy only files under the data dir
+are reachable; send others as `data_base64` with `file_name`. Sent files are recorded in history and can
+be fetched again with `get_media`.
 
 Voice transcription uses any OpenAI-compatible `/audio/transcriptions` endpoint and never runs on its own:
 only a `get_media` call with `transcribe=true` sends audio to it. Without `MEOWMCP_STT_API_KEY` audio is
@@ -122,7 +130,7 @@ mcp_servers:
     headers:
       Authorization: "Bearer ${MEOWMCP_AUTH_TOKEN}"
     timeout: 300          # wait_for_reply blocks up to 240s
-    trust: untrusted      # approve every send_message
+    trust: untrusted      # approve every send_message / send_file
 ```
 
 or spawned over stdio:

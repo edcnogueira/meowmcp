@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -117,40 +118,78 @@ func (p *Provider) Contacts(ctx context.Context) ([]domain.Contact, error) {
 }
 
 func (p *Provider) SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error) {
-	cli, err := p.readyClient()
+	cli, to, err := p.sendTarget(chatJID)
 	if err != nil {
 		return domain.SentMessage{}, err
+	}
+	msg := &waE2E.Message{Conversation: proto.String(text)}
+	if quoted != nil {
+		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			Text:        proto.String(text),
+			ContextInfo: quoteContext(cli, quoted),
+		}}
+	}
+	return p.send(ctx, cli, to, msg)
+}
+
+func (p *Provider) SendMedia(ctx context.Context, chatJID string, media domain.OutgoingMedia, quoted *domain.Message) (domain.SentMessage, error) {
+	appInfo, err := uploadMediaType(media.Kind)
+	if err != nil {
+		return domain.SentMessage{}, err
+	}
+	cli, to, err := p.sendTarget(chatJID)
+	if err != nil {
+		return domain.SentMessage{}, err
+	}
+	upload, err := cli.Upload(ctx, media.Data, appInfo)
+	if err != nil {
+		return domain.SentMessage{}, fmt.Errorf("failed to upload %s: %w", media.Kind, err)
+	}
+	var contextInfo *waE2E.ContextInfo
+	if quoted != nil {
+		contextInfo = quoteContext(cli, quoted)
+	}
+	return p.send(ctx, cli, to, MediaMessage(media, upload, contextInfo))
+}
+
+func (p *Provider) sendTarget(chatJID string) (*whatsmeow.Client, types.JID, error) {
+	cli, err := p.readyClient()
+	if err != nil {
+		return nil, types.JID{}, err
 	}
 	to, err := ParseChatJID(chatJID)
 	if err != nil {
-		return domain.SentMessage{}, err
+		return nil, types.JID{}, err
 	}
+	return cli, to, nil
+}
 
-	msg := &waE2E.Message{Conversation: proto.String(text)}
-	if quoted != nil {
-		participant := quoted.SenderJID
-		if quoted.FromMe && cli.Store.ID != nil {
-			participant = cli.Store.ID.ToNonAD().String()
-		}
-		msg = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-			Text: proto.String(text),
-			ContextInfo: &waE2E.ContextInfo{
-				StanzaID:      proto.String(quoted.ID),
-				Participant:   proto.String(participant),
-				QuotedMessage: &waE2E.Message{Conversation: proto.String(quoted.Text)},
-			},
-		}}
-	}
-
+func (p *Provider) send(ctx context.Context, cli *whatsmeow.Client, to types.JID, msg *waE2E.Message) (domain.SentMessage, error) {
 	resp, err := cli.SendMessage(ctx, to, msg)
 	if err != nil {
 		return domain.SentMessage{}, fmt.Errorf("failed to send message: %w", err)
 	}
+	content := ExtractContent(msg)
 	return domain.SentMessage{
 		ID:        resp.ID,
 		ChatJID:   p.chatOf(ctx, cli, to).String(),
 		Timestamp: resp.Timestamp,
+		Text:      content.Text,
+		MediaType: content.MediaType,
+		MediaRef:  MediaRef(msg),
 	}, nil
+}
+
+func quoteContext(cli *whatsmeow.Client, quoted *domain.Message) *waE2E.ContextInfo {
+	participant := quoted.SenderJID
+	if quoted.FromMe && cli.Store.ID != nil {
+		participant = cli.Store.ID.ToNonAD().String()
+	}
+	return &waE2E.ContextInfo{
+		StanzaID:      proto.String(quoted.ID),
+		Participant:   proto.String(participant),
+		QuotedMessage: &waE2E.Message{Conversation: proto.String(quoted.Text)},
+	}
 }
 
 func (p *Provider) MarkRead(ctx context.Context, chatJID string, msgs []domain.Message) error {

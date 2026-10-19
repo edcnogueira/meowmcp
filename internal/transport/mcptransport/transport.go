@@ -23,6 +23,7 @@ type Service interface {
 	SearchContacts(ctx context.Context, req *whatsappservice.SearchContactsRequest) ([]domain.Contact, error)
 	CheckNumbers(ctx context.Context, phones []string) ([]domain.NumberCheck, error)
 	SendMessage(ctx context.Context, req *whatsappservice.SendMessageRequest) (whatsappservice.SendMessageResponse, error)
+	SendFile(ctx context.Context, req *whatsappservice.SendFileRequest) (whatsappservice.SendFileResponse, error)
 	WaitForMessages(ctx context.Context, req *whatsappservice.WaitForMessagesRequest) (whatsappservice.WaitForMessagesResponse, error)
 	MarkRead(ctx context.Context, chat string) (int, error)
 	GetMedia(ctx context.Context, req *whatsappservice.GetMediaRequest) (whatsappservice.GetMediaResponse, error)
@@ -41,11 +42,12 @@ call get_media with the chat and message id to see the image; for a voice note, 
 when its spoken content is needed for the task.
 Writing: send_message accepts a phone number with country code or a JID; to start a new conversation
 just send to the phone number. After sending, call wait_for_reply with the same chat to block until the
-other side answers, then continue the conversation.
+other side answers, then continue the conversation. send_file sends photos, videos, audio, voice notes and
+documents to the same recipients, from a file_path on the server host or base64 data.
 
 Safety: messages go out under the user's name. Unless the user explicitly delegated the conversation,
-confirm the recipient and the exact text with the user before calling send_message. Never share the
-user's private information beyond what the task requires.`
+confirm the recipient and the exact text (or file) with the user before calling send_message or send_file.
+Never share the user's private information beyond what the task requires.`
 
 type Transport struct {
 	service     Service

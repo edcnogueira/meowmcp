@@ -12,7 +12,7 @@ import (
 	"github.com/edcnogueira/meowmcp/internal/domain"
 )
 
-const messageColumns = `chat_jid, id, sender_jid, sender_name, from_me, timestamp, text, media_type, quoted_id`
+const messageColumns = `chat_jid, id, sender_jid, sender_name, from_me, timestamp, text, media_type, quoted_id, transcript`
 
 func (r *Repository) SaveMessages(ctx context.Context, msgs []domain.Message) error {
 	if len(msgs) == 0 {
@@ -25,12 +25,14 @@ func (r *Repository) SaveMessages(ctx context.Context, msgs []domain.Message) er
 	defer func() { _ = tx.Rollback() }()
 
 	msgStmt, err := tx.PrepareContext(ctx, `
-INSERT INTO messages (`+messageColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO messages (chat_jid, id, sender_jid, sender_name, from_me, timestamp, text, media_type, quoted_id, media_ref)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (chat_jid, id) DO UPDATE SET
 	sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END,
 	text = excluded.text,
 	media_type = excluded.media_type,
-	quoted_id = excluded.quoted_id`)
+	quoted_id = excluded.quoted_id,
+	media_ref = COALESCE(excluded.media_ref, messages.media_ref)`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare message upsert: %w", err)
 	}
@@ -46,7 +48,7 @@ ON CONFLICT (jid) DO UPDATE SET last_message_at = MAX(chats.last_message_at, exc
 
 	for _, m := range msgs {
 		if _, err := msgStmt.ExecContext(ctx, m.ChatJID, m.ID, m.SenderJID, m.SenderName, m.FromMe,
-			unix(m.Timestamp), m.Text, m.MediaType, m.QuotedID); err != nil {
+			unix(m.Timestamp), m.Text, m.MediaType, m.QuotedID, nullBytes(m.MediaRef)); err != nil {
 			return fmt.Errorf("failed to save message %s: %w", m.ID, err)
 		}
 		if _, err := chatStmt.ExecContext(ctx, m.ChatJID, unix(m.Timestamp)); err != nil {
@@ -87,6 +89,36 @@ WHERE chat_jid IN (`+placeholders(len(chatJIDs))+`) AND id = ?`, append(stringsT
 	return m, nil
 }
 
+func (r *Repository) GetMedia(ctx context.Context, chatJIDs []string, id string) (domain.Message, error) {
+	if len(chatJIDs) == 0 {
+		return domain.Message{}, domain.ErrMessageNotFound
+	}
+	row := r.db.QueryRowContext(ctx, `SELECT `+messageColumns+`, media_ref FROM messages
+WHERE chat_jid IN (`+placeholders(len(chatJIDs))+`) AND id = ?`, append(stringsToAny(chatJIDs), id)...)
+	var ref []byte
+	m, err := scanMessage(row, &ref)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return domain.Message{}, domain.ErrMessageNotFound
+	case err != nil:
+		return domain.Message{}, fmt.Errorf("failed to get media of message %s: %w", id, err)
+	}
+	m.MediaRef = ref
+	return m, nil
+}
+
+func (r *Repository) SetTranscript(ctx context.Context, chatJIDs []string, id, transcript string) error {
+	if len(chatJIDs) == 0 {
+		return nil
+	}
+	args := append(append([]any{transcript}, stringsToAny(chatJIDs)...), id)
+	_, err := r.db.ExecContext(ctx, `UPDATE messages SET transcript = ? WHERE chat_jid IN (`+placeholders(len(chatJIDs))+`) AND id = ?`, args...)
+	if err != nil {
+		return fmt.Errorf("failed to store transcript of message %s: %w", id, err)
+	}
+	return nil
+}
+
 type ListMessagesRequest struct {
 	ChatJIDs     []string
 	Before       time.Time
@@ -117,8 +149,9 @@ func (r *Repository) ListMessages(ctx context.Context, req *ListMessagesRequest)
 		conds = append(conds, "from_me = 0")
 	}
 	if q := strings.TrimSpace(req.Query); q != "" {
-		conds = append(conds, `text LIKE ? ESCAPE '\'`)
-		args = append(args, "%"+escapeLike(q)+"%")
+		conds = append(conds, `(text LIKE ? ESCAPE '\' OR transcript LIKE ? ESCAPE '\')`)
+		like := "%" + escapeLike(q) + "%"
+		args = append(args, like, like)
 	}
 	where := ""
 	if len(conds) > 0 {
@@ -165,16 +198,24 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanMessage(s scanner) (domain.Message, error) {
+func scanMessage(s scanner, extra ...any) (domain.Message, error) {
 	var (
 		m  domain.Message
 		ts int64
 	)
-	if err := s.Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.SenderName, &m.FromMe, &ts, &m.Text, &m.MediaType, &m.QuotedID); err != nil {
+	dest := append([]any{&m.ChatJID, &m.ID, &m.SenderJID, &m.SenderName, &m.FromMe, &ts, &m.Text, &m.MediaType, &m.QuotedID, &m.Transcript}, extra...)
+	if err := s.Scan(dest...); err != nil {
 		return domain.Message{}, err
 	}
 	m.Timestamp = fromUnix(ts)
 	return m, nil
+}
+
+func nullBytes(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 func stringsToAny(ss []string) []any {

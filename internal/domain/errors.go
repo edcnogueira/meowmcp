@@ -9,4 +9,6 @@ var (
 	ErrNotOnWhatsApp    = errors.New("phone number is not registered on WhatsApp")
 	ErrInvalidRecipient = errors.New("invalid recipient: use a phone number with country code (e.g. +5511999998888) or a JID")
 	ErrMessageNotFound  = errors.New("message not found in local history")
+	ErrNoMedia          = errors.New("message has no downloadable media (text, location, contact, poll, or received before media support)")
+	ErrMediaUnavailable = errors.New("media is no longer available on WhatsApp's servers; ask the sender to send it again")
 )

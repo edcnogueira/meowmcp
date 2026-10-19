@@ -30,6 +30,8 @@ var migrations = []string{
 	);
 	CREATE INDEX messages_chat_timestamp ON messages (chat_jid, timestamp);
 	CREATE INDEX chats_last_message_at ON chats (last_message_at);`,
+	`ALTER TABLE messages ADD COLUMN media_ref BLOB;
+	ALTER TABLE messages ADD COLUMN transcript TEXT NOT NULL DEFAULT '';`,
 }
 
 type Repository struct {

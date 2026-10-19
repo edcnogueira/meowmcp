@@ -73,7 +73,7 @@ func (r *Repository) ListChats(ctx context.Context, req *ListChatsRequest) ([]do
 
 	rows, err := r.db.QueryContext(ctx, `
 SELECT c.jid, c.name, c.is_group, c.last_message_at,
-       m.id, m.sender_jid, m.sender_name, m.from_me, m.timestamp, m.text, m.media_type, m.quoted_id
+       m.id, m.sender_jid, m.sender_name, m.from_me, m.timestamp, m.text, m.media_type, m.quoted_id, m.transcript
 FROM chats c
 LEFT JOIN messages m ON m.rowid = (
 	SELECT rowid FROM messages WHERE chat_jid = c.jid ORDER BY timestamp DESC, rowid DESC LIMIT 1
@@ -89,15 +89,15 @@ LIMIT ? OFFSET ?`, args...)
 	chats := make([]domain.Chat, 0)
 	for rows.Next() {
 		var (
-			chat                      domain.Chat
-			lastAt                    int64
-			msgID, sender, senderName sql.NullString
-			text, mediaType, quotedID sql.NullString
-			fromMe                    sql.NullBool
-			msgTS                     sql.NullInt64
+			chat                                  domain.Chat
+			lastAt                                int64
+			msgID, sender, senderName             sql.NullString
+			text, mediaType, quotedID, transcript sql.NullString
+			fromMe                                sql.NullBool
+			msgTS                                 sql.NullInt64
 		)
 		if err := rows.Scan(&chat.JID, &chat.Name, &chat.IsGroup, &lastAt,
-			&msgID, &sender, &senderName, &fromMe, &msgTS, &text, &mediaType, &quotedID); err != nil {
+			&msgID, &sender, &senderName, &fromMe, &msgTS, &text, &mediaType, &quotedID, &transcript); err != nil {
 			return nil, fmt.Errorf("failed to scan chat: %w", err)
 		}
 		chat.LastMessageAt = fromUnix(lastAt)
@@ -112,6 +112,7 @@ LIMIT ? OFFSET ?`, args...)
 				Text:       text.String,
 				MediaType:  mediaType.String,
 				QuotedID:   quotedID.String,
+				Transcript: transcript.String,
 			}
 		}
 		chats = append(chats, chat)

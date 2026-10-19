@@ -168,6 +168,7 @@ func (p *Provider) convertMessage(ctx context.Context, cli *whatsmeow.Client, ch
 		Text:       c.Text,
 		MediaType:  c.MediaType,
 		QuotedID:   c.QuotedID,
+		MediaRef:   MediaRef(e.Message),
 	}, nil, true
 }
 

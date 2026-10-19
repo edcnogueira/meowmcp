@@ -25,6 +25,7 @@ type Service interface {
 	SendMessage(ctx context.Context, req *whatsappservice.SendMessageRequest) (whatsappservice.SendMessageResponse, error)
 	WaitForMessages(ctx context.Context, req *whatsappservice.WaitForMessagesRequest) (whatsappservice.WaitForMessagesResponse, error)
 	MarkRead(ctx context.Context, chat string) (int, error)
+	GetMedia(ctx context.Context, req *whatsappservice.GetMediaRequest) (whatsappservice.GetMediaResponse, error)
 }
 
 const instructions = `WhatsApp access to the user's own personal account (messages are sent as the user).
@@ -35,6 +36,9 @@ cannot scan, call login with their phone number and give them the 8-character pa
 WhatsApp > Linked devices > Link with phone number instead. Poll get_status until state is "connected".
 
 Reading: list_chats (optionally with query) or search_contacts to find a chat JID, then get_messages.
+Messages with media_type image, sticker, voice, audio, video or document carry only a caption/file name;
+call get_media with the chat and message id to see the image or read the voice note's transcript before
+answering about it.
 Writing: send_message accepts a phone number with country code or a JID; to start a new conversation
 just send to the phone number. After sending, call wait_for_reply with the same chat to block until the
 other side answers, then continue the conversation.

@@ -3,6 +3,7 @@ package whatsappservice
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type WhatsApp interface {
 	Contacts(ctx context.Context) ([]domain.Contact, error)
 	SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error)
 	MarkRead(ctx context.Context, chatJID string, msgs []domain.Message) error
+	DownloadMedia(ctx context.Context, ref []byte, dst *os.File) error
 }
 
 type MessagesRepository interface {
@@ -35,21 +37,31 @@ type MessagesRepository interface {
 	SaveMessages(ctx context.Context, msgs []domain.Message) error
 	UpdateMessageText(ctx context.Context, chatJIDs []string, id, text string) error
 	GetMessage(ctx context.Context, chatJIDs []string, id string) (domain.Message, error)
+	GetMedia(ctx context.Context, chatJIDs []string, id string) (domain.Message, error)
+	SetTranscript(ctx context.Context, chatJIDs []string, id, transcript string) error
 	ListMessages(ctx context.Context, req *messagesrepo.ListMessagesRequest) ([]domain.Message, error)
 	LastSentAt(ctx context.Context, chatJIDs []string) (time.Time, error)
 }
 
-type Service struct {
-	whatsapp WhatsApp
-	messages MessagesRepository
-	broker   *broker
+type Transcriber interface {
+	Transcribe(ctx context.Context, path string) (string, error)
 }
 
-func New(whatsapp WhatsApp, messages MessagesRepository) *Service {
+type Service struct {
+	whatsapp    WhatsApp
+	messages    MessagesRepository
+	transcriber Transcriber
+	mediaDir    string
+	broker      *broker
+}
+
+func New(whatsapp WhatsApp, messages MessagesRepository, transcriber Transcriber, mediaDir string) *Service {
 	return &Service{
-		whatsapp: whatsapp,
-		messages: messages,
-		broker:   newBroker(),
+		whatsapp:    whatsapp,
+		messages:    messages,
+		transcriber: transcriber,
+		mediaDir:    mediaDir,
+		broker:      newBroker(),
 	}
 }
 

@@ -33,8 +33,9 @@ var mediaExtensions = map[string]string{
 }
 
 type GetMediaRequest struct {
-	Chat      string
-	MessageID string
+	Chat       string
+	MessageID  string
+	Transcribe bool
 }
 
 type GetMediaResponse struct {
@@ -71,7 +72,7 @@ func (s *Service) GetMedia(ctx context.Context, req *GetMediaRequest) (GetMediaR
 		return GetMediaResponse{}, err
 	}
 	resp := GetMediaResponse{Message: msg, Path: path, MimeType: baseType, Size: size}
-	if strings.HasPrefix(baseType, "audio/") {
+	if strings.HasPrefix(baseType, "audio/") && (msg.Transcript != "" || req.Transcribe) {
 		resp.Transcript, resp.TranscriptionError = s.transcript(ctx, msg, aliases, path)
 		resp.Message.Transcript = resp.Transcript
 	}

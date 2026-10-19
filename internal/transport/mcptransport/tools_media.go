@@ -15,8 +15,9 @@ import (
 const maxInlineImageBytes = 10 << 20
 
 type getMediaInput struct {
-	Chat      string `json:"chat" jsonschema:"chat JID or phone number of the conversation the message is in"`
-	MessageID string `json:"message_id" jsonschema:"id of a message whose media_type is image, sticker, voice, audio, video or document"`
+	Chat       string `json:"chat" jsonschema:"chat JID or phone number of the conversation the message is in"`
+	MessageID  string `json:"message_id" jsonschema:"id of a message whose media_type is image, sticker, voice, audio, video or document"`
+	Transcribe bool   `json:"transcribe,omitempty" jsonschema:"voice/audio only: send the audio to the server's speech-to-text API and return the text. Default false: the audio is only downloaded. Set it only when the spoken content is needed"`
 }
 
 type mediaOutput struct {
@@ -33,7 +34,7 @@ type mediaOutput struct {
 }
 
 func (t *Transport) getMedia(ctx context.Context, _ *mcp.CallToolRequest, in getMediaInput) (*mcp.CallToolResult, mediaOutput, error) {
-	resp, err := t.service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: in.Chat, MessageID: in.MessageID})
+	resp, err := t.service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: in.Chat, MessageID: in.MessageID, Transcribe: in.Transcribe})
 	if err != nil {
 		return nil, mediaOutput{}, err
 	}
@@ -57,6 +58,8 @@ func (t *Transport) getMedia(ctx context.Context, _ *mcp.CallToolRequest, in get
 		}
 	case strings.HasPrefix(resp.MimeType, "image/"):
 		out.Note = fmt.Sprintf("image larger than %d MB is not attached; open it from file_path", maxInlineImageBytes>>20)
+	case strings.HasPrefix(resp.MimeType, "audio/") && resp.Transcript == "" && resp.TranscriptionError == "":
+		out.Note = "audio not transcribed; call get_media again with transcribe=true to get the text"
 	case !strings.HasPrefix(resp.MimeType, "audio/"):
 		out.Note = "content is not rendered for this type; open it from file_path"
 	}

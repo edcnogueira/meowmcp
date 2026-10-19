@@ -21,7 +21,7 @@ chats, search history, reply, start new conversations with any number and wait f
 | `logout` | Unlinks the device |
 | `list_chats` | Chats by recent activity with their last message; `query` filters by name/number |
 | `get_messages` | Messages of a chat (JID or phone number), oldest to newest, with `before`/`after` paging |
-| `get_media` | Downloads a message's image, sticker, voice note, audio, video or document. Images come back as an image the model sees; audio comes back transcribed; every type also returns the local `file_path` |
+| `get_media` | Downloads a message's image, sticker, voice note, audio, video or document. Images come back as an image the model sees; audio is transcribed only with `transcribe=true`; every type also returns the local `file_path` |
 | `search_messages` | Text search across all chats or one chat, including voice-note transcripts |
 | `search_contacts` | Address book + known chats by name, business name or number |
 | `check_numbers` | Which numbers are on WhatsApp, their JIDs and verified business names |
@@ -39,8 +39,9 @@ and video/documents are returned by path only. Media WhatsApp no longer serves (
 request to ask the sender to resend. Business messages with buttons or lists include their options in
 `text` so the agent can pick one.
 
-Voice transcription uses any OpenAI-compatible `/audio/transcriptions` endpoint and is only called by
-`get_media`; without `MEOWMCP_STT_API_KEY` audio is still downloaded and `transcription_error` says so.
+Voice transcription uses any OpenAI-compatible `/audio/transcriptions` endpoint and never runs on its own:
+only a `get_media` call with `transcribe=true` sends audio to it. Without `MEOWMCP_STT_API_KEY` audio is
+still downloaded and `transcription_error` says so.
 
 ## Run
 

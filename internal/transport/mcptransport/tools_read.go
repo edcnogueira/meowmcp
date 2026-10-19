@@ -68,7 +68,7 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_messages",
-		Description: "Read the messages of one chat, returned oldest to newest. Media is described by media_type plus caption/file name; call get_media to see an image or transcribe a voice note.",
+		Description: "Read the messages of one chat, returned oldest to newest. Media is described by media_type plus caption/file name; call get_media to see an image or download a voice note (transcribe=true for its text).",
 		Annotations: readOnly,
 	}, t.getMessages)
 
@@ -92,8 +92,8 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_media",
-		Description: "Download the attachment of one message (image, sticker, voice, audio, video, document) and interpret it: images are returned for you to see, " +
-			"voice notes and audio come back transcribed to text. Also returns file_path, a local copy you can share with the user by path. " +
+		Description: "Download the attachment of one message (image, sticker, voice, audio, video, document): images are returned for you to see, every type returns file_path, a local copy you can share with the user by path. " +
+			"Voice notes and audio are only transcribed to text when transcribe=true, which sends the audio to the server's speech-to-text API. " +
 			"Downloads and transcripts are cached, so repeated calls are cheap.",
 		Annotations: &mcp.ToolAnnotations{Title: "Get WhatsApp media", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
 	}, t.getMedia)

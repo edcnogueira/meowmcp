@@ -84,24 +84,32 @@ var _ = Describe("GetMedia", func() {
 		DirectPath: proto.String("/v/t62/voice"),
 	}}
 
-	It("downloads a voice note once, transcribes it once and exposes the transcript in history", func() {
+	It("transcribes a voice note only when asked, once, and keeps the transcript in history", func() {
 		service := whatsappservice.New(wa, repo, stt, mediaDir)
 		voice := store(wa.lidJID, voiceNote, "voice")
 
-		By("asking for the media through the chat's phone-number JID")
-		first, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID})
+		By("downloading it through the chat's phone-number JID without asking for a transcript")
+		plain, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(first.MimeType).To(Equal("audio/ogg"))
-		Expect(first.Path).To(HavePrefix(mediaDir))
-		Expect(first.Path).To(HaveSuffix(".ogg"))
-		Expect(os.ReadFile(first.Path)).To(Equal(wa.payload))
-		Expect(first.Transcript).To(Equal(stt.text))
+		Expect(plain.MimeType).To(Equal("audio/ogg"))
+		Expect(plain.Path).To(HavePrefix(mediaDir))
+		Expect(plain.Path).To(HaveSuffix(".ogg"))
+		Expect(os.ReadFile(plain.Path)).To(Equal(wa.payload))
+		Expect(plain.Transcript).To(BeEmpty())
+		Expect(stt.paths).To(BeEmpty())
 
-		By("asking again")
-		second, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID})
+		By("asking for the transcript")
+		transcribed, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID, Transcribe: true})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(second.Path).To(Equal(first.Path))
-		Expect(second.Transcript).To(Equal(stt.text))
+		Expect(transcribed.Path).To(Equal(plain.Path))
+		Expect(transcribed.Transcript).To(Equal(stt.text))
+
+		By("asking again, with and without transcribe")
+		for _, transcribe := range []bool{true, false} {
+			again, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID, Transcribe: transcribe})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(again.Transcript).To(Equal(stt.text))
+		}
 		Expect(wa.downloads).To(Equal(1))
 		Expect(stt.paths).To(HaveLen(1))
 
@@ -116,7 +124,7 @@ var _ = Describe("GetMedia", func() {
 		service := whatsappservice.New(wa, repo, nil, mediaDir)
 		voice := store(wa.pnJID, voiceNote, "voice")
 
-		resp, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID})
+		resp, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: voice.ID, Transcribe: true})
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resp.Path).To(BeAnExistingFile())
@@ -128,7 +136,7 @@ var _ = Describe("GetMedia", func() {
 		service := whatsappservice.New(wa, repo, stt, mediaDir)
 		image := store(wa.pnJID, &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}}, "image")
 
-		resp, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: image.ID})
+		resp, err := service.GetMedia(ctx, &whatsappservice.GetMediaRequest{Chat: wa.pnJID, MessageID: image.ID, Transcribe: true})
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resp.MimeType).To(Equal("image/jpeg"))

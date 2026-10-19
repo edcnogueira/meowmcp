@@ -25,6 +25,7 @@ type WhatsApp interface {
 	CheckNumbers(ctx context.Context, phones []string) ([]domain.NumberCheck, error)
 	Contacts(ctx context.Context) ([]domain.Contact, error)
 	SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error)
+	SendMedia(ctx context.Context, chatJID string, media domain.OutgoingMedia, quoted *domain.Message) (domain.SentMessage, error)
 	MarkRead(ctx context.Context, chatJID string, msgs []domain.Message) error
 	DownloadMedia(ctx context.Context, ref []byte, dst *os.File) error
 }

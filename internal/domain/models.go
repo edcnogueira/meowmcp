@@ -70,4 +70,27 @@ type SentMessage struct {
 	ID        string
 	ChatJID   string
 	Timestamp time.Time
+	Text      string
+	MediaType string
+	MediaRef  []byte
+}
+
+type MediaKind string
+
+const (
+	MediaKindImage    MediaKind = "image"
+	MediaKindVideo    MediaKind = "video"
+	MediaKindAudio    MediaKind = "audio"
+	MediaKindVoice    MediaKind = "voice"
+	MediaKindDocument MediaKind = "document"
+)
+
+func (k MediaKind) String() string { return string(k) }
+
+type OutgoingMedia struct {
+	Kind     MediaKind
+	MimeType string
+	FileName string
+	Caption  string
+	Data     []byte
 }

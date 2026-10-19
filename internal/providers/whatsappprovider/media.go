@@ -51,6 +51,82 @@ func MediaMimeType(ref []byte) (string, error) {
 	return mimeType, err
 }
 
+func MediaMessage(media domain.OutgoingMedia, upload whatsmeow.UploadResponse, contextInfo *waE2E.ContextInfo) *waE2E.Message {
+	caption := proto.String(media.Caption)
+	if media.Caption == "" {
+		caption = nil
+	}
+	switch media.Kind {
+	case domain.MediaKindImage:
+		return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+			Caption:       caption,
+			Mimetype:      proto.String(media.MimeType),
+			URL:           proto.String(upload.URL),
+			DirectPath:    proto.String(upload.DirectPath),
+			MediaKey:      upload.MediaKey,
+			FileEncSHA256: upload.FileEncSHA256,
+			FileSHA256:    upload.FileSHA256,
+			FileLength:    proto.Uint64(upload.FileLength),
+			ContextInfo:   contextInfo,
+		}}
+	case domain.MediaKindVideo:
+		return &waE2E.Message{VideoMessage: &waE2E.VideoMessage{
+			Caption:       caption,
+			Mimetype:      proto.String(media.MimeType),
+			URL:           proto.String(upload.URL),
+			DirectPath:    proto.String(upload.DirectPath),
+			MediaKey:      upload.MediaKey,
+			FileEncSHA256: upload.FileEncSHA256,
+			FileSHA256:    upload.FileSHA256,
+			FileLength:    proto.Uint64(upload.FileLength),
+			ContextInfo:   contextInfo,
+		}}
+	case domain.MediaKindAudio, domain.MediaKindVoice:
+		mimeType := media.MimeType
+		if media.Kind == domain.MediaKindVoice {
+			mimeType = "audio/ogg; codecs=opus"
+		}
+		return &waE2E.Message{AudioMessage: &waE2E.AudioMessage{
+			Mimetype:      proto.String(mimeType),
+			PTT:           proto.Bool(media.Kind == domain.MediaKindVoice),
+			URL:           proto.String(upload.URL),
+			DirectPath:    proto.String(upload.DirectPath),
+			MediaKey:      upload.MediaKey,
+			FileEncSHA256: upload.FileEncSHA256,
+			FileSHA256:    upload.FileSHA256,
+			FileLength:    proto.Uint64(upload.FileLength),
+			ContextInfo:   contextInfo,
+		}}
+	}
+	return &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{
+		Caption:       caption,
+		Title:         proto.String(media.FileName),
+		FileName:      proto.String(media.FileName),
+		Mimetype:      proto.String(media.MimeType),
+		URL:           proto.String(upload.URL),
+		DirectPath:    proto.String(upload.DirectPath),
+		MediaKey:      upload.MediaKey,
+		FileEncSHA256: upload.FileEncSHA256,
+		FileSHA256:    upload.FileSHA256,
+		FileLength:    proto.Uint64(upload.FileLength),
+		ContextInfo:   contextInfo,
+	}}
+}
+
+func uploadMediaType(kind domain.MediaKind) (whatsmeow.MediaType, error) {
+	switch kind {
+	case domain.MediaKindImage:
+		return whatsmeow.MediaImage, nil
+	case domain.MediaKindVideo:
+		return whatsmeow.MediaVideo, nil
+	case domain.MediaKindAudio, domain.MediaKindVoice:
+		return whatsmeow.MediaAudio, nil
+	case domain.MediaKindDocument:
+		return whatsmeow.MediaDocument, nil
+	}
+	return "", fmt.Errorf("unsupported media kind %q", kind)
+}
+
 func (p *Provider) DownloadMedia(ctx context.Context, ref []byte, dst *os.File) error {
 	msg, _, err := decodeMediaRef(ref)
 	if err != nil {

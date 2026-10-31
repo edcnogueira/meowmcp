@@ -32,6 +32,18 @@ func (s *Service) ListChats(ctx context.Context, req *ListChatsRequest) ([]domai
 	if err != nil {
 		return nil, fmt.Errorf("failed to list chats: %w", err)
 	}
+	last := make([]domain.Message, 0, len(chats))
+	for _, c := range chats {
+		if c.LastMessage != nil {
+			last = append(last, *c.LastMessage)
+		}
+	}
+	s.decorate(ctx, last)
+	for i := range chats {
+		if chats[i].LastMessage != nil {
+			chats[i].LastMessage, last = &last[0], last[1:]
+		}
+	}
 	return chats, nil
 }
 

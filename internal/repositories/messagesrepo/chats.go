@@ -73,11 +73,8 @@ func (r *Repository) ListChats(ctx context.Context, req *ListChatsRequest) ([]do
 
 	rows, err := r.db.QueryContext(ctx, `
 SELECT c.jid, c.name, c.is_group, c.last_message_at,
-       m.id, m.sender_jid, m.sender_name, m.from_me, m.timestamp, m.text, m.media_type, m.quoted_id, m.transcript
+       (SELECT seq FROM messages WHERE chat_jid = c.jid ORDER BY timestamp DESC, seq DESC LIMIT 1)
 FROM chats c
-LEFT JOIN messages m ON m.rowid = (
-	SELECT rowid FROM messages WHERE chat_jid = c.jid ORDER BY timestamp DESC, rowid DESC LIMIT 1
-)
 `+where+`
 ORDER BY c.last_message_at DESC, c.jid
 LIMIT ? OFFSET ?`, args...)
@@ -86,39 +83,42 @@ LIMIT ? OFFSET ?`, args...)
 	}
 	defer rows.Close()
 
-	chats := make([]domain.Chat, 0)
+	var (
+		chats   = make([]domain.Chat, 0)
+		lastSeq = make([]int64, 0)
+	)
 	for rows.Next() {
 		var (
-			chat                                  domain.Chat
-			lastAt                                int64
-			msgID, sender, senderName             sql.NullString
-			text, mediaType, quotedID, transcript sql.NullString
-			fromMe                                sql.NullBool
-			msgTS                                 sql.NullInt64
+			chat   domain.Chat
+			lastAt int64
+			seq    sql.NullInt64
 		)
-		if err := rows.Scan(&chat.JID, &chat.Name, &chat.IsGroup, &lastAt,
-			&msgID, &sender, &senderName, &fromMe, &msgTS, &text, &mediaType, &quotedID, &transcript); err != nil {
+		if err := rows.Scan(&chat.JID, &chat.Name, &chat.IsGroup, &lastAt, &seq); err != nil {
 			return nil, fmt.Errorf("failed to scan chat: %w", err)
 		}
 		chat.LastMessageAt = fromUnix(lastAt)
-		if msgID.Valid {
-			chat.LastMessage = &domain.Message{
-				ID:         msgID.String,
-				ChatJID:    chat.JID,
-				SenderJID:  sender.String,
-				SenderName: senderName.String,
-				FromMe:     fromMe.Bool,
-				Timestamp:  fromUnix(msgTS.Int64),
-				Text:       text.String,
-				MediaType:  mediaType.String,
-				QuotedID:   quotedID.String,
-				Transcript: transcript.String,
-			}
-		}
 		chats = append(chats, chat)
+		lastSeq = append(lastSeq, seq.Int64)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate chats: %w", err)
+	}
+	_ = rows.Close()
+
+	wanted := make([]int64, 0, len(lastSeq))
+	for _, seq := range lastSeq {
+		if seq != 0 {
+			wanted = append(wanted, seq)
+		}
+	}
+	last, err := r.messagesBySeq(ctx, wanted)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load last messages: %w", err)
+	}
+	for i := range chats {
+		if m, ok := last[lastSeq[i]]; ok {
+			chats[i].LastMessage = &m
+		}
 	}
 	return chats, nil
 }

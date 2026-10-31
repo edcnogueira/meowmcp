@@ -68,6 +68,46 @@ var _ = Describe("ExtractContent", func() {
 
 		Expect(got.IsEmpty()).To(BeTrue())
 	})
+
+	It("keeps who is tagged in a caption and whether the photo is view-once", func() {
+		tagged := gofakeit.Numerify("###############") + "@lid"
+
+		got := whatsappprovider.ExtractContent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{
+			Caption:     proto.String("@" + tagged[:15] + " " + gofakeit.Sentence(2)),
+			ViewOnce:    proto.Bool(true),
+			ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{tagged}},
+		}})
+
+		Expect(got.Mentions).To(Equal([]string{tagged}))
+		Expect(got.ViewOnce).To(BeTrue())
+	})
+})
+
+var _ = Describe("SplitAgentName", func() {
+	DescribeTable("moves a business attendant signature out of the text",
+		func(text, wantAgent, wantRest string) {
+			agent, rest, ok := whatsappprovider.SplitAgentName(text)
+			Expect(ok).To(BeTrue())
+			Expect(agent).To(Equal(wantAgent))
+			Expect(rest).To(Equal(wantRest))
+		},
+		Entry("name and colon in bold on its own line", "*Stefanny:*\nSua consulta está confirmada.", "Stefanny", "Sua consulta está confirmada."),
+		Entry("colon after the bold", "*Sthefanny*: Bom dia!", "Sthefanny", "Bom dia!"),
+		Entry("accented full name", "*Ana Lúcia:* \nPode enviar o documento?", "Ana Lúcia", "Pode enviar o documento?"),
+	)
+
+	DescribeTable("leaves text without an attendant signature alone",
+		func(text string) {
+			agent, rest, ok := whatsappprovider.SplitAgentName(text)
+			Expect(ok).To(BeFalse())
+			Expect(agent).To(BeEmpty())
+			Expect(rest).To(Equal(text))
+		},
+		Entry("bold word without colon", "*Importante* amanhã fechado"),
+		Entry("signature only", "*Stefanny:*"),
+		Entry("bold in the middle", "Oi *Stefanny:* tudo bem"),
+		Entry("long bold sentence", "*Atenção para o novo horário de atendimento:* das 8h às 18h"),
+	)
 })
 
 var _ = Describe("NormalizePhone", func() {

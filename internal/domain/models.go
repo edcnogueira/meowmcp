@@ -38,17 +38,55 @@ type Chat struct {
 }
 
 type Message struct {
-	ID         string
-	ChatJID    string
-	SenderJID  string
-	SenderName string
-	FromMe     bool
-	Timestamp  time.Time
-	Text       string
-	MediaType  string
-	QuotedID   string
-	Transcript string
-	MediaRef   []byte
+	Seq               int64
+	ID                string
+	ChatJID           string
+	SenderJID         string
+	SenderName        string
+	AgentName         string
+	FromMe            bool
+	Timestamp         time.Time
+	Text              string
+	MediaType         string
+	ViewOnce          bool
+	QuotedID          string
+	Mentions          []Mention
+	Transcript        string
+	TranscriptUnclear bool
+	MediaRef          []byte
+	HasMediaKey       bool
+	MediaFile         string
+	MediaStatus       MediaStatus
+}
+
+type Mention struct {
+	JID   string
+	Phone string
+	Name  string
+	IsMe  bool
+}
+
+type MediaStatus string
+
+const (
+	MediaStatusReady        MediaStatus = "ready"
+	MediaStatusDownloadable MediaStatus = "downloadable"
+	MediaStatusMissingKey   MediaStatus = "missing_key"
+)
+
+func (s MediaStatus) String() string { return string(s) }
+
+func IsDownloadableMediaType(mediaType string) bool {
+	switch mediaType {
+	case "image", "video", "audio", "voice", "document", "sticker":
+		return true
+	}
+	return false
+}
+
+type Transcript struct {
+	Text    string
+	Unclear bool
 }
 
 type Contact struct {

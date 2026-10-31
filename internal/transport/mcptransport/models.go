@@ -7,12 +7,13 @@ import (
 )
 
 type statusOutput struct {
-	State     string         `json:"state" jsonschema:"logged_out, pairing, connecting, connected or disconnected"`
-	JID       string         `json:"jid,omitempty" jsonschema:"the logged-in account JID"`
-	PushName  string         `json:"push_name,omitempty" jsonschema:"the logged-in account display name"`
-	LastError string         `json:"last_error,omitempty"`
-	Pairing   *pairingOutput `json:"pairing,omitempty" jsonschema:"present while state is pairing"`
-	NextStep  string         `json:"next_step" jsonschema:"what to do next"`
+	State        string         `json:"state" jsonschema:"logged_out, pairing, connecting, connected or disconnected"`
+	JID          string         `json:"jid,omitempty" jsonschema:"the logged-in account JID"`
+	PushName     string         `json:"push_name,omitempty" jsonschema:"the logged-in account display name"`
+	LastError    string         `json:"last_error,omitempty"`
+	Pairing      *pairingOutput `json:"pairing,omitempty" jsonschema:"present while state is pairing"`
+	SendApproval string         `json:"send_approval" jsonschema:"required: send_message and send_file refuse to send without an approval token issued by the user's client; off: no token needed"`
+	NextStep     string         `json:"next_step" jsonschema:"what to do next"`
 }
 
 type pairingOutput struct {
@@ -33,16 +34,30 @@ type chatOutput struct {
 }
 
 type messageOutput struct {
-	ID         string `json:"id"`
-	ChatJID    string `json:"chat_jid"`
-	SenderJID  string `json:"sender_jid,omitempty"`
-	SenderName string `json:"sender_name,omitempty"`
-	FromMe     bool   `json:"from_me" jsonschema:"true when sent by the logged-in user"`
-	Timestamp  string `json:"timestamp"`
-	Text       string `json:"text,omitempty"`
-	MediaType  string `json:"media_type,omitempty" jsonschema:"set for non-text messages: image, video, audio, voice, document, sticker, location, contact, poll, buttons, list, interactive. For image, sticker, voice, audio, video and document call get_media to see or transcribe the content"`
-	Transcript string `json:"transcript,omitempty" jsonschema:"speech-to-text of a voice/audio message, present once get_media has transcribed it"`
-	ReplyToID  string `json:"reply_to_id,omitempty" jsonschema:"ID of the quoted message"`
+	Seq               int64           `json:"seq" jsonschema:"local arrival order, strictly increasing; pass the highest one seen as since_id to read only newer messages"`
+	ID                string          `json:"id"`
+	ChatJID           string          `json:"chat_jid"`
+	SenderJID         string          `json:"sender_jid,omitempty"`
+	SenderName        string          `json:"sender_name,omitempty"`
+	AgentName         string          `json:"agent_name,omitempty" jsonschema:"attendant who wrote this message for a business account; the *Name:* signature is removed from text"`
+	FromMe            bool            `json:"from_me" jsonschema:"true when sent by the logged-in user"`
+	Timestamp         string          `json:"timestamp"`
+	Text              string          `json:"text,omitempty"`
+	Mentions          []mentionOutput `json:"mentions,omitempty" jsonschema:"who each @tag in text refers to"`
+	MediaType         string          `json:"media_type,omitempty" jsonschema:"set for non-text messages: image, video, audio, voice, document, sticker, location, contact, poll, buttons, list, interactive. For image, sticker, voice, audio, video and document call get_media to see or transcribe the content"`
+	MediaStatus       string          `json:"media_status,omitempty" jsonschema:"attachments only: ready (stored on the server, get_media returns it), downloadable (get_media fetches it from WhatsApp) or missing_key (no download key in history; cannot be fetched, ask the sender to resend)"`
+	ViewOnce          bool            `json:"view_once,omitempty" jsonschema:"view-once photo, video or audio; stored on arrival so get_media returns it"`
+	Transcript        string          `json:"transcript,omitempty" jsonschema:"speech-to-text of a voice/audio message, present once get_media has transcribed it"`
+	TranscriptUnclear bool            `json:"transcript_unclear,omitempty" jsonschema:"speech-to-text had low confidence: treat the transcript as unreliable and do not complete or guess words"`
+	ReplyToID         string          `json:"reply_to_id,omitempty" jsonschema:"ID of the quoted message"`
+}
+
+type mentionOutput struct {
+	Tag   string `json:"tag" jsonschema:"the @tag as it appears in text"`
+	JID   string `json:"jid"`
+	Phone string `json:"phone,omitempty"`
+	Name  string `json:"name,omitempty"`
+	IsMe  bool   `json:"is_me,omitempty" jsonschema:"the tag is the logged-in user (you)"`
 }
 
 type contactOutput struct {
@@ -60,12 +75,16 @@ type numberCheckOutput struct {
 	BusinessName string `json:"business_name,omitempty"`
 }
 
-func toStatusOutput(st domain.Status, qrImagePath string) statusOutput {
+func toStatusOutput(st domain.Status, qrImagePath string, approvalRequired bool) statusOutput {
 	out := statusOutput{
-		State:     st.State.String(),
-		JID:       st.JID,
-		PushName:  st.PushName,
-		LastError: st.LastError,
+		State:        st.State.String(),
+		JID:          st.JID,
+		PushName:     st.PushName,
+		LastError:    st.LastError,
+		SendApproval: "off",
+	}
+	if approvalRequired {
+		out.SendApproval = "required"
 	}
 	if st.Pairing != nil {
 		out.Pairing = &pairingOutput{
@@ -111,18 +130,42 @@ func toChatOutput(c domain.Chat) chatOutput {
 }
 
 func toMessageOutput(m domain.Message) messageOutput {
-	return messageOutput{
-		ID:         m.ID,
-		ChatJID:    m.ChatJID,
-		SenderJID:  m.SenderJID,
-		SenderName: m.SenderName,
-		FromMe:     m.FromMe,
-		Timestamp:  formatTime(m.Timestamp),
-		Text:       m.Text,
-		MediaType:  m.MediaType,
-		ReplyToID:  m.QuotedID,
-		Transcript: m.Transcript,
+	out := messageOutput{
+		Seq:               m.Seq,
+		ID:                m.ID,
+		ChatJID:           m.ChatJID,
+		SenderJID:         m.SenderJID,
+		SenderName:        m.SenderName,
+		AgentName:         m.AgentName,
+		FromMe:            m.FromMe,
+		Timestamp:         formatTime(m.Timestamp),
+		Text:              m.Text,
+		MediaType:         m.MediaType,
+		MediaStatus:       m.MediaStatus.String(),
+		ViewOnce:          m.ViewOnce,
+		ReplyToID:         m.QuotedID,
+		Transcript:        m.Transcript,
+		TranscriptUnclear: m.TranscriptUnclear,
 	}
+	for _, mention := range m.Mentions {
+		user, _, _ := strings.Cut(mention.JID, "@")
+		out.Mentions = append(out.Mentions, mentionOutput{
+			Tag:   "@" + user,
+			JID:   mention.JID,
+			Phone: mention.Phone,
+			Name:  mention.Name,
+			IsMe:  mention.IsMe,
+		})
+	}
+	return out
+}
+
+func toOptionalMessage(m *domain.Message) *messageOutput {
+	if m == nil {
+		return nil
+	}
+	out := toMessageOutput(*m)
+	return &out
 }
 
 func toMessageOutputs(msgs []domain.Message) []messageOutput {

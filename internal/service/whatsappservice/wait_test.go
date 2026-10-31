@@ -44,7 +44,7 @@ var _ = Describe("WaitForMessages", func() {
 			pnJID:  gofakeit.Numerify("55119########") + "@s.whatsapp.net",
 			lidJID: gofakeit.Numerify("###############") + "@lid",
 		}
-		service = whatsappservice.New(wa, repo, nil, GinkgoT().TempDir())
+		service = whatsappservice.New(wa, repo, nil, whatsappservice.Config{MediaDir: GinkgoT().TempDir()})
 	})
 
 	message := func(chat string, fromMe bool, ts time.Time) domain.Message {
@@ -60,29 +60,39 @@ var _ = Describe("WaitForMessages", func() {
 		By("storing history with a reply that arrived before the wait call")
 		service.HandleUpdate(ctx, whatsappprovider.Update{Messages: []domain.Message{olderIncoming, sent, reply}})
 
-		By("waiting without an explicit since")
+		By("waiting without an explicit since_id")
 		resp, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, Timeout: time.Second})
 
-		By("getting only the reply, with a cursor past it")
+		By("getting only the reply, with a cursor at it")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(resp.TimedOut).To(BeFalse())
 		Expect(resp.Messages).To(HaveLen(1))
 		Expect(resp.Messages[0].ID).To(Equal(reply.ID))
-		Expect(resp.NextSince).To(BeTemporally("==", reply.Timestamp.Add(time.Second)))
+		Expect(resp.NextSinceID).To(Equal(resp.Messages[0].Seq))
 	})
 
-	It("does not return the same reply again when waiting from next_since", func() {
+	It("returns a later reply that carries the same second as the one already seen, and never repeats one", func() {
 		sentAt := time.Now().Add(-time.Minute)
-		reply := message(wa.pnJID, false, sentAt.Add(5*time.Second))
-		service.HandleUpdate(ctx, whatsappprovider.Update{Messages: []domain.Message{message(wa.pnJID, true, sentAt), reply}})
+		first := message(wa.pnJID, false, sentAt.Add(5*time.Second))
+		service.HandleUpdate(ctx, whatsappprovider.Update{Messages: []domain.Message{message(wa.pnJID, true, sentAt), first}})
 
-		first, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, Timeout: time.Second})
+		seen, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, Timeout: time.Second})
 		Expect(err).NotTo(HaveOccurred())
+		Expect(seen.Messages).To(HaveLen(1))
 
-		second, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, Since: first.NextSince, Timeout: 100 * time.Millisecond})
+		By("a second message stamped with the same second arriving after the first was read")
+		second := message(wa.lidJID, false, first.Timestamp)
+		service.HandleUpdate(ctx, whatsappprovider.Update{Messages: []domain.Message{second}})
+
+		next, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, SinceID: seen.NextSinceID, Timeout: time.Second})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(second.TimedOut).To(BeTrue())
-		Expect(second.Messages).To(BeEmpty())
+		Expect(next.Messages).To(HaveLen(1))
+		Expect(next.Messages[0].ID).To(Equal(second.ID))
+
+		again, err := service.WaitForMessages(ctx, &whatsappservice.WaitForMessagesRequest{Chat: wa.pnJID, SinceID: next.NextSinceID, Timeout: 100 * time.Millisecond})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(again.TimedOut).To(BeTrue())
+		Expect(again.Messages).To(BeEmpty())
 	})
 
 	It("wakes up on a live incoming message and ignores the user's own messages", func() {

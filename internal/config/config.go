@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const (
@@ -15,12 +16,14 @@ const (
 )
 
 type Config struct {
-	Transport string
-	HTTPAddr  string
-	AuthToken string
-	DataDir   string
-	LogLevel  string
-	STT       STTConfig
+	Transport                  string
+	HTTPAddr                   string
+	AuthToken                  string
+	DataDir                    string
+	LogLevel                   string
+	SendApprovalSecret         string
+	EventsAllowPrivateCallback bool
+	STT                        STTConfig
 }
 
 type STTConfig struct {
@@ -47,6 +50,8 @@ func Load(args []string) (Config, error) {
 	fs.StringVar(&cfg.STT.APIKey, "stt-api-key", os.Getenv("MEOWMCP_STT_API_KEY"), "API key for voice transcription; empty disables it (env MEOWMCP_STT_API_KEY)")
 	fs.StringVar(&cfg.STT.Model, "stt-model", envOr("MEOWMCP_STT_MODEL", "whisper-large-v3-turbo"), "transcription model (env MEOWMCP_STT_MODEL)")
 	fs.StringVar(&cfg.STT.Language, "stt-language", os.Getenv("MEOWMCP_STT_LANGUAGE"), "ISO-639-1 language hint, e.g. pt; empty auto-detects (env MEOWMCP_STT_LANGUAGE)")
+	fs.StringVar(&cfg.SendApprovalSecret, "send-approval-secret", os.Getenv("MEOWMCP_SEND_APPROVAL_SECRET"), "shared secret for send approval tokens; when set, send_message and send_file refuse to send without a valid token (env MEOWMCP_SEND_APPROVAL_SECRET)")
+	fs.BoolVar(&cfg.EventsAllowPrivateCallback, "events-allow-private-callbacks", envBool("MEOWMCP_EVENTS_ALLOW_PRIVATE_CALLBACKS"), "allow event webhooks to private, loopback and CGNAT addresses (env MEOWMCP_EVENTS_ALLOW_PRIVATE_CALLBACKS)")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -74,6 +79,9 @@ func (c Config) validate() error {
 	if c.DataDir == "" {
 		return errors.New("-data-dir must not be empty")
 	}
+	if c.SendApprovalSecret != "" && len(c.SendApprovalSecret) < 32 {
+		return errors.New("-send-approval-secret (MEOWMCP_SEND_APPROVAL_SECRET) must be at least 32 characters")
+	}
 	return nil
 }
 
@@ -90,4 +98,9 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(key string) bool {
+	v, err := strconv.ParseBool(os.Getenv(key))
+	return err == nil && v
 }

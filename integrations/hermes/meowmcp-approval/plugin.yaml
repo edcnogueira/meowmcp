@@ -1,0 +1,5 @@
+name: meowmcp-approval
+version: "1.0"
+description: Asks the user to approve every meowmcp send_message/send_file and signs the approved recipient and content so the server accepts it.
+requires_env:
+  - MEOWMCP_SEND_APPROVAL_SECRET

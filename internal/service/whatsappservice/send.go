@@ -66,11 +66,13 @@ type SendMessageRequest struct {
 	To        string
 	Text      string
 	ReplyToID string
+	Approval  string
 }
 
 type SendMessageResponse struct {
 	Sent domain.SentMessage
 	Chat domain.Chat
+	Seq  int64
 }
 
 type SendFileRequest struct {
@@ -81,12 +83,16 @@ type SendFileRequest struct {
 	Caption   string
 	SendAs    string
 	ReplyToID string
+	Approval  string
 }
 
 type SendFileResponse struct {
 	Sent     domain.SentMessage
 	Chat     domain.Chat
+	Seq      int64
 	MimeType string
+	FileName string
+	Caption  string
 	Size     int64
 }
 
@@ -94,9 +100,18 @@ func (s *Service) SendMessage(ctx context.Context, req *SendMessageRequest) (Sen
 	if err := validateSendMessageRequest(req); err != nil {
 		return SendMessageResponse{}, err
 	}
-	return s.send(ctx, req.To, req.ReplyToID, func(chatJID string, quoted *domain.Message) (domain.SentMessage, error) {
-		return s.whatsapp.SendText(ctx, chatJID, req.Text, quoted)
+	finish, err := s.approvals.reserve(req.To, TextDigest(req.Text), req.Approval)
+	if err != nil {
+		return SendMessageResponse{}, err
+	}
+	delivered := false
+	resp, err := s.send(ctx, req.To, req.ReplyToID, func(chatJID string, quoted *domain.Message) (domain.SentMessage, error) {
+		sent, err := s.whatsapp.SendText(ctx, chatJID, req.Text, quoted)
+		delivered = err == nil
+		return sent, err
 	})
+	finish(delivered)
+	return resp, err
 }
 
 func (s *Service) SendFile(ctx context.Context, req *SendFileRequest) (SendFileResponse, error) {
@@ -107,13 +122,29 @@ func (s *Service) SendFile(ctx context.Context, req *SendFileRequest) (SendFileR
 	if err != nil {
 		return SendFileResponse{}, err
 	}
-	resp, err := s.send(ctx, req.To, req.ReplyToID, func(chatJID string, quoted *domain.Message) (domain.SentMessage, error) {
-		return s.whatsapp.SendMedia(ctx, chatJID, media, quoted)
-	})
+	finish, err := s.approvals.reserve(req.To, FileDigest(media.Data, media.FileName, media.Caption), req.Approval)
 	if err != nil {
 		return SendFileResponse{}, err
 	}
-	return SendFileResponse{Sent: resp.Sent, Chat: resp.Chat, MimeType: media.MimeType, Size: int64(len(media.Data))}, nil
+	delivered := false
+	resp, err := s.send(ctx, req.To, req.ReplyToID, func(chatJID string, quoted *domain.Message) (domain.SentMessage, error) {
+		sent, err := s.whatsapp.SendMedia(ctx, chatJID, media, quoted)
+		delivered = err == nil
+		return sent, err
+	})
+	finish(delivered)
+	if err != nil {
+		return SendFileResponse{}, err
+	}
+	return SendFileResponse{
+		Sent:     resp.Sent,
+		Chat:     resp.Chat,
+		Seq:      resp.Seq,
+		MimeType: media.MimeType,
+		FileName: media.FileName,
+		Caption:  media.Caption,
+		Size:     int64(len(media.Data)),
+	}, nil
 }
 
 func (s *Service) send(ctx context.Context, to, replyToID string, deliver func(chatJID string, quoted *domain.Message) (domain.SentMessage, error)) (SendMessageResponse, error) {
@@ -160,15 +191,18 @@ func (s *Service) send(ctx context.Context, to, replyToID string, deliver func(c
 	}); err != nil {
 		logctx.Error(ctx, "failed to record chat of sent message", zap.String("chat_jid", sent.ChatJID), zap.Error(err))
 	}
+	var seq int64
 	if err := s.messages.SaveMessages(ctx, []domain.Message{msg}); err != nil {
 		logctx.Error(ctx, "failed to record sent message", zap.String("message_id", sent.ID), zap.Error(err))
+	} else if stored, err := s.messages.GetMessage(ctx, []string{sent.ChatJID}, sent.ID); err == nil {
+		seq = stored.Seq
 	}
 
 	chat, err := s.chatInfo(ctx, sent.ChatJID, aliases)
 	if err != nil {
 		return SendMessageResponse{}, err
 	}
-	return SendMessageResponse{Sent: sent, Chat: chat}, nil
+	return SendMessageResponse{Sent: sent, Chat: chat, Seq: seq}, nil
 }
 
 func outgoingMedia(req *SendFileRequest) (domain.OutgoingMedia, error) {

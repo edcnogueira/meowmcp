@@ -32,6 +32,14 @@ var migrations = []string{
 	CREATE INDEX chats_last_message_at ON chats (last_message_at);`,
 	`ALTER TABLE messages ADD COLUMN media_ref BLOB;
 	ALTER TABLE messages ADD COLUMN transcript TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE messages ADD COLUMN seq INTEGER;
+	ALTER TABLE messages ADD COLUMN agent_name TEXT NOT NULL DEFAULT '';
+	ALTER TABLE messages ADD COLUMN mentions TEXT NOT NULL DEFAULT '';
+	ALTER TABLE messages ADD COLUMN transcript_unclear INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE messages ADD COLUMN media_file TEXT NOT NULL DEFAULT '';
+	ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0;
+	UPDATE messages SET seq = rowid;
+	CREATE UNIQUE INDEX messages_seq ON messages (seq);`,
 }
 
 type Repository struct {

@@ -19,15 +19,34 @@ type listChatsOutput struct {
 }
 
 type getMessagesInput struct {
-	Chat   string `json:"chat" jsonschema:"chat JID (from list_chats/search_contacts) or phone number with country code"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"max messages to return, newest first selected then returned oldest to newest (default 30, max 300)"`
-	Before string `json:"before,omitempty" jsonschema:"only messages before this RFC 3339 timestamp or YYYY-MM-DD date (for paging back)"`
-	After  string `json:"after,omitempty" jsonschema:"only messages at or after this RFC 3339 timestamp or YYYY-MM-DD date"`
+	Chat    string `json:"chat" jsonschema:"chat JID (from list_chats/search_contacts) or phone number with country code"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"max messages to return (default 30, max 300)"`
+	Before  string `json:"before,omitempty" jsonschema:"only messages before this RFC 3339 timestamp or YYYY-MM-DD date (for paging back)"`
+	After   string `json:"after,omitempty" jsonschema:"only messages at or after this RFC 3339 timestamp or YYYY-MM-DD date"`
+	SinceID int64  `json:"since_id,omitempty" jsonschema:"only messages stored after this seq (a message seq or a previous next_since_id), oldest first; never skips messages that share a timestamp or arrived late"`
 }
 
 type getMessagesOutput struct {
-	Chat     chatOutput      `json:"chat"`
-	Messages []messageOutput `json:"messages" jsonschema:"oldest to newest"`
+	Chat        chatOutput      `json:"chat"`
+	Messages    []messageOutput `json:"messages" jsonschema:"oldest to newest; with since_id, in arrival order"`
+	NextSinceID int64           `json:"next_since_id" jsonschema:"pass as since_id to get only messages that arrive after these"`
+	MarkedRead  bool            `json:"marked_read" jsonschema:"always false: reading never sends read receipts"`
+}
+
+type getChatStateInput struct {
+	Chat string `json:"chat" jsonschema:"chat JID or phone number with country code"`
+}
+
+type getChatStateOutput struct {
+	Chat            chatOutput      `json:"chat"`
+	WaitingOn       string          `json:"waiting_on" jsonschema:"them: the last message is the user's, the other side has not answered; user: the other side wrote last and has no answer; empty: no messages"`
+	LastIncoming    *messageOutput  `json:"last_incoming,omitempty"`
+	LastOutgoing    *messageOutput  `json:"last_outgoing,omitempty"`
+	Unanswered      []messageOutput `json:"unanswered" jsonschema:"incoming messages after the user's last message (up to 20), oldest first"`
+	UnansweredCount int             `json:"unanswered_count"`
+	OpenQuestion    *messageOutput  `json:"open_question,omitempty" jsonschema:"newest unanswered incoming message that asks something (question mark, buttons, list or poll)"`
+	SinceID         int64           `json:"since_id" jsonschema:"newest seq in the chat; get_messages with since_id returns only what arrives after it"`
+	MarkedRead      bool            `json:"marked_read" jsonschema:"always false: reading never sends read receipts"`
 }
 
 type searchMessagesInput struct {
@@ -67,10 +86,20 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 	}, t.listChats)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_messages",
-		Description: "Read the messages of one chat, returned oldest to newest. Media is described by media_type plus caption/file name; call get_media to see an image or download a voice note (transcribe=true for its text).",
+		Name: "get_messages",
+		Description: "Read the messages of one chat, returned oldest to newest; since_id returns only what arrived after a known message. " +
+			"Never sends read receipts (marked_read is always false). Media is described by media_type, media_status and caption/file name; " +
+			"call get_media to see an image or download a voice note (transcribe=true for its text).",
 		Annotations: readOnly,
 	}, t.getMessages)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_chat_state",
+		Description: "One-call summary of a conversation for the start of a turn: last incoming and outgoing message, who the chat is waiting on, " +
+			"the unanswered incoming messages, the open question if any, and whether attachments are ready or cannot be downloaded. " +
+			"Never sends read receipts.",
+		Annotations: readOnly,
+	}, t.getChatState)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search_messages",
@@ -92,9 +121,9 @@ func (t *Transport) registerReadTools(server *mcp.Server) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_media",
-		Description: "Download the attachment of one message (image, sticker, voice, audio, video, document): images are returned for you to see, every type returns file_path, a local copy you can share with the user by path. " +
-			"Voice notes and audio are only transcribed to text when transcribe=true, which sends the audio to the server's speech-to-text API. " +
-			"Downloads and transcripts are cached, so repeated calls are cheap.",
+		Description: "Return the attachment of one message (image, sticker, voice, audio, video, document): images are returned for you to see, every type returns file_path, a local copy you can share with the user by path. " +
+			"View-once media and anything fetched before is served from the stored copy. Voice notes and audio are only transcribed to text when transcribe=true, which sends the audio to the server's speech-to-text API. " +
+			"Never sends read receipts (marked_read is always false).",
 		Annotations: &mcp.ToolAnnotations{Title: "Get WhatsApp media", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(true)},
 	}, t.getMedia)
 }
@@ -121,15 +150,44 @@ func (t *Transport) getMessages(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, getMessagesOutput{}, err
 	}
 	resp, err := t.service.GetMessages(ctx, &whatsappservice.GetMessagesRequest{
-		Chat:   in.Chat,
-		Limit:  in.Limit,
-		Before: before,
-		After:  after,
+		Chat:    in.Chat,
+		Limit:   in.Limit,
+		Before:  before,
+		After:   after,
+		SinceID: in.SinceID,
 	})
 	if err != nil {
 		return nil, getMessagesOutput{}, err
 	}
-	return nil, getMessagesOutput{Chat: toChatOutput(resp.Chat), Messages: toMessageOutputs(resp.Messages)}, nil
+	return nil, getMessagesOutput{
+		Chat:        toChatOutput(resp.Chat),
+		Messages:    toMessageOutputs(resp.Messages),
+		NextSinceID: resp.NextSinceID,
+	}, nil
+}
+
+func (t *Transport) getChatState(ctx context.Context, _ *mcp.CallToolRequest, in getChatStateInput) (*mcp.CallToolResult, getChatStateOutput, error) {
+	st, err := t.service.ChatState(ctx, in.Chat)
+	if err != nil {
+		return nil, getChatStateOutput{}, err
+	}
+	out := getChatStateOutput{
+		Chat:            toChatOutput(st.Chat),
+		LastIncoming:    toOptionalMessage(st.LastIncoming),
+		LastOutgoing:    toOptionalMessage(st.LastOutgoing),
+		Unanswered:      toMessageOutputs(st.Unanswered),
+		UnansweredCount: len(st.Unanswered),
+		OpenQuestion:    toOptionalMessage(st.OpenQuestion),
+		SinceID:         st.LastSeq,
+	}
+	switch {
+	case st.LastIncoming == nil && st.LastOutgoing == nil:
+	case st.LastIncoming == nil || (st.LastOutgoing != nil && len(st.Unanswered) == 0):
+		out.WaitingOn = "them"
+	default:
+		out.WaitingOn = "user"
+	}
+	return nil, out, nil
 }
 
 func (t *Transport) searchMessages(ctx context.Context, _ *mcp.CallToolRequest, in searchMessagesInput) (*mcp.CallToolResult, messagesOutput, error) {

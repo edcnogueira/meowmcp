@@ -133,7 +133,7 @@ var _ = Describe("Repository", func() {
 		jid, word := newJID(), gofakeit.LetterN(12)
 		voice := domain.Message{ID: gofakeit.UUID(), ChatJID: jid, Timestamp: at(0), MediaType: "voice"}
 		Expect(repo.SaveMessages(ctx, []domain.Message{voice})).To(Succeed())
-		Expect(repo.SetTranscript(ctx, []string{jid}, voice.ID, "consulta "+word+" amanhã")).To(Succeed())
+		Expect(repo.SetTranscript(ctx, []string{jid}, voice.ID, "consulta "+word+" amanhã", true)).To(Succeed())
 		Expect(repo.SaveMessages(ctx, []domain.Message{voice})).To(Succeed())
 
 		msgs, err := repo.ListMessages(ctx, &messagesrepo.ListMessagesRequest{Query: word, Limit: 10})
@@ -142,6 +142,31 @@ var _ = Describe("Repository", func() {
 		Expect(msgs).To(HaveLen(1))
 		Expect(msgs[0].ID).To(Equal(voice.ID))
 		Expect(msgs[0].Transcript).To(ContainSubstring(word))
+		Expect(msgs[0].TranscriptUnclear).To(BeTrue())
+	})
+
+	It("pages forward by arrival order without losing messages that share a second or arrive late", func() {
+		pn, lid := newJID(), gofakeit.Numerify("###############")+"@lid"
+		first := domain.Message{ID: gofakeit.UUID(), ChatJID: pn, Timestamp: at(0), Text: gofakeit.Sentence(3)}
+		Expect(repo.SaveMessages(ctx, []domain.Message{first})).To(Succeed())
+		cursor, err := repo.MaxSeq(ctx, []string{pn, lid})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("storing one message in the same second and one delivered late with an older clock")
+		sameSecond := domain.Message{ID: gofakeit.UUID(), ChatJID: lid, Timestamp: at(0), Text: gofakeit.Sentence(3)}
+		late := domain.Message{ID: gofakeit.UUID(), ChatJID: pn, Timestamp: at(-time.Hour), Text: gofakeit.Sentence(3)}
+		Expect(repo.SaveMessages(ctx, []domain.Message{sameSecond, late})).To(Succeed())
+
+		By("saving the first message again, as an edit or history sync does")
+		first.Text = gofakeit.Sentence(3)
+		Expect(repo.SaveMessages(ctx, []domain.Message{first})).To(Succeed())
+
+		msgs, err := repo.ListMessages(ctx, &messagesrepo.ListMessagesRequest{ChatJIDs: []string{pn, lid}, Forward: true, AfterSeq: cursor, Limit: 10})
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(msgs).To(HaveLen(2))
+		Expect([]string{msgs[0].ID, msgs[1].ID}).To(Equal([]string{sameSecond.ID, late.ID}))
+		Expect(msgs[1].Seq).To(BeNumerically(">", msgs[0].Seq))
 	})
 
 	It("reopens an existing database without re-running migrations", func() {

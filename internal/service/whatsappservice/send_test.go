@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
@@ -19,11 +20,21 @@ import (
 
 type sendWhatsApp struct {
 	*mediaWhatsApp
-	sent []domain.OutgoingMedia
+	sent    []domain.OutgoingMedia
+	texts   []string
+	sendErr error
 }
 
 func (f *sendWhatsApp) Status() domain.Status {
 	return domain.Status{State: domain.ConnectionStateConnected}
+}
+
+func (f *sendWhatsApp) SendText(_ context.Context, chatJID, text string, _ *domain.Message) (domain.SentMessage, error) {
+	if f.sendErr != nil {
+		return domain.SentMessage{}, f.sendErr
+	}
+	f.texts = append(f.texts, text)
+	return domain.SentMessage{ID: gofakeit.UUID(), ChatJID: chatJID, Timestamp: time.Now().Truncate(time.Second), Text: text}, nil
 }
 
 func (f *sendWhatsApp) SendMedia(_ context.Context, chatJID string, media domain.OutgoingMedia, _ *domain.Message) (domain.SentMessage, error) {
@@ -62,7 +73,7 @@ var _ = Describe("SendFile", func() {
 			},
 			payload: payload,
 		}}
-		service = whatsappservice.New(wa, repo, nil, GinkgoT().TempDir())
+		service = whatsappservice.New(wa, repo, nil, whatsappservice.Config{MediaDir: GinkgoT().TempDir()})
 	})
 
 	It("sends a document from a server path and keeps it fetchable through history", func() {
@@ -126,4 +137,116 @@ var _ = Describe("SendFile", func() {
 		Entry("caption on audio", whatsappservice.SendFileRequest{Data: []byte("x"), FileName: "song.mp3", Caption: "hi"}, "caption is not supported"),
 		Entry("missing path", whatsappservice.SendFileRequest{Path: "/nonexistent/meowmcp.pdf"}, "file_path"),
 	)
+})
+
+var _ = Describe("Send approval", func() {
+	var (
+		ctx     context.Context
+		wa      *sendWhatsApp
+		service *whatsappservice.Service
+		secret  []byte
+		phone   string
+	)
+
+	BeforeEach(func() {
+		ctx = context.Background()
+		repo, err := messagesrepo.Open(ctx, filepath.Join(GinkgoT().TempDir(), "messages.db"))
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(repo.Close)
+
+		phone = gofakeit.Numerify("+55 11 9####-####")
+		digits := strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, phone)
+		wa = &sendWhatsApp{mediaWhatsApp: &mediaWhatsApp{fakeWhatsApp: &fakeWhatsApp{
+			pnJID:  digits + "@s.whatsapp.net",
+			lidJID: gofakeit.Numerify("###############") + "@lid",
+		}}}
+		secret = []byte(gofakeit.LetterN(40))
+		service = whatsappservice.New(wa, repo, nil, whatsappservice.Config{MediaDir: GinkgoT().TempDir(), SendApprovalSecret: string(secret)})
+	})
+
+	approve := func(to, text string, expires time.Time) string {
+		recipient, err := whatsappservice.ApprovalRecipient(to)
+		Expect(err).NotTo(HaveOccurred())
+		return whatsappservice.MintApproval(secret, recipient, whatsappservice.TextDigest(text), expires)
+	}
+
+	It("sends exactly the approved text once and echoes it", func() {
+		text := gofakeit.Sentence(6)
+		token := approve(phone, text, time.Now().Add(2*time.Minute))
+
+		resp, err := service.SendMessage(ctx, &whatsappservice.SendMessageRequest{To: phone, Text: text, Approval: token})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.Sent.Text).To(Equal(text))
+		Expect(resp.Seq).To(BeNumerically(">", 0))
+
+		By("replaying the same token")
+		_, err = service.SendMessage(ctx, &whatsappservice.SendMessageRequest{To: phone, Text: text, Approval: token})
+		Expect(err).To(MatchError(domain.ErrApprovalInvalid))
+		Expect(wa.texts).To(Equal([]string{text}))
+	})
+
+	It("lets an approval be used again when WhatsApp did not take the message", func() {
+		text := gofakeit.Sentence(6)
+		token := approve(wa.pnJID, text, time.Now().Add(2*time.Minute))
+		wa.sendErr = domain.ErrNotConnected
+
+		_, err := service.SendMessage(ctx, &whatsappservice.SendMessageRequest{To: wa.pnJID, Text: text, Approval: token})
+		Expect(err).To(MatchError(domain.ErrNotConnected))
+
+		wa.sendErr = nil
+		_, err = service.SendMessage(ctx, &whatsappservice.SendMessageRequest{To: wa.pnJID, Text: text, Approval: token})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	DescribeTable("refuses to send without a matching, fresh approval",
+		func(mutate func(to, text *string) string, wantErr error) {
+			to, text := phone, gofakeit.Sentence(6)
+			token := mutate(&to, &text)
+
+			_, err := service.SendMessage(ctx, &whatsappservice.SendMessageRequest{To: to, Text: text, Approval: token})
+
+			Expect(err).To(MatchError(wantErr))
+			Expect(wa.texts).To(BeEmpty())
+		},
+		Entry("no token", func(_, _ *string) string { return "" }, domain.ErrApprovalRequired),
+		Entry("text changed after approval", func(to, text *string) string {
+			token := approve(*to, *text, time.Now().Add(time.Minute))
+			*text += "!"
+			return token
+		}, domain.ErrApprovalInvalid),
+		Entry("approved for another recipient", func(to, text *string) string {
+			return approve(gofakeit.Numerify("+55 21 9####-####"), *text, time.Now().Add(time.Minute))
+		}, domain.ErrApprovalInvalid),
+		Entry("expired", func(to, text *string) string {
+			return approve(*to, *text, time.Now().Add(-time.Second))
+		}, domain.ErrApprovalInvalid),
+		Entry("valid for too long", func(to, text *string) string {
+			return approve(*to, *text, time.Now().Add(time.Hour))
+		}, domain.ErrApprovalInvalid),
+		Entry("signed with another secret", func(to, text *string) string {
+			recipient, _ := whatsappservice.ApprovalRecipient(*to)
+			return whatsappservice.MintApproval([]byte(gofakeit.LetterN(40)), recipient, whatsappservice.TextDigest(*text), time.Now().Add(time.Minute))
+		}, domain.ErrApprovalInvalid),
+	)
+
+	It("binds a file approval to its content and caption", func() {
+		data, caption := []byte(gofakeit.LetterN(256)), gofakeit.Sentence(3)
+		recipient, err := whatsappservice.ApprovalRecipient(phone)
+		Expect(err).NotTo(HaveOccurred())
+		token := whatsappservice.MintApproval(secret, recipient, whatsappservice.FileDigest(data, "report.pdf", caption), time.Now().Add(time.Minute))
+
+		_, err = service.SendFile(ctx, &whatsappservice.SendFileRequest{To: phone, Data: append([]byte{'x'}, data...), FileName: "report.pdf", Caption: caption, Approval: token})
+		Expect(err).To(MatchError(domain.ErrApprovalInvalid))
+
+		resp, err := service.SendFile(ctx, &whatsappservice.SendFileRequest{To: phone, Data: data, FileName: "report.pdf", Caption: caption, Approval: token})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.Caption).To(Equal(caption))
+		Expect(resp.FileName).To(Equal("report.pdf"))
+		Expect(wa.sent).To(HaveLen(1))
+	})
 })

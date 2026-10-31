@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/edcnogueira/meowmcp/internal/domain"
 	"github.com/edcnogueira/meowmcp/internal/providers/sttprovider"
 )
 
@@ -36,11 +37,15 @@ var _ = Describe("Transcribe", func() {
 			Expect(r.Header.Get("Authorization")).To(Equal("Bearer " + apiKey))
 			Expect(r.FormValue("model")).To(Equal(model))
 			Expect(r.FormValue("language")).To(Equal("pt"))
+			Expect(r.FormValue("response_format")).To(Equal("verbose_json"))
 			file, header, err := r.FormFile("file")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(header.Filename).To(Equal(filepath.Base(audioPath)))
 			Expect(io.ReadAll(file)).To(Equal(audio))
-			_ = json.NewEncoder(w).Encode(map[string]string{"text": " " + text + "\n"})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"text":     " " + text + "\n",
+				"segments": []map[string]float64{{"avg_logprob": -0.2, "no_speech_prob": 0.01, "compression_ratio": 1.3}},
+			})
 		}))
 		DeferCleanup(server.Close)
 
@@ -48,7 +53,47 @@ var _ = Describe("Transcribe", func() {
 		got, err := p.Transcribe(context.Background(), audioPath)
 
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got).To(Equal(text))
+		Expect(got).To(Equal(domain.Transcript{Text: text}))
+	})
+
+	DescribeTable("flags a transcript as unclear when any segment has low confidence",
+		func(segment map[string]float64) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"text":     gofakeit.Sentence(3),
+					"segments": []map[string]float64{{"avg_logprob": -0.1, "no_speech_prob": 0.01, "compression_ratio": 1.2}, segment},
+				})
+			}))
+			DeferCleanup(server.Close)
+
+			got, err := sttprovider.New(sttprovider.Config{BaseURL: server.URL, APIKey: gofakeit.UUID(), Model: gofakeit.Word()}).
+				Transcribe(context.Background(), audioPath)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Unclear).To(BeTrue())
+		},
+		Entry("low average log probability", map[string]float64{"avg_logprob": -1.3, "no_speech_prob": 0.05, "compression_ratio": 1.4}),
+		Entry("probably no speech", map[string]float64{"avg_logprob": -0.4, "no_speech_prob": 0.8, "compression_ratio": 1.4}),
+		Entry("repetitive output", map[string]float64{"avg_logprob": -0.4, "no_speech_prob": 0.05, "compression_ratio": 2.9}),
+	)
+
+	It("falls back to plain json for models without verbose_json", func() {
+		text := gofakeit.Sentence(4)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.FormValue("response_format") == "verbose_json" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"response_format 'verbose_json' is not compatible with this model"}}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"text": text})
+		}))
+		DeferCleanup(server.Close)
+
+		got, err := sttprovider.New(sttprovider.Config{BaseURL: server.URL, APIKey: gofakeit.UUID(), Model: gofakeit.Word()}).
+			Transcribe(context.Background(), audioPath)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal(domain.Transcript{Text: text}))
 	})
 
 	It("reports the API's status and message on failure", func() {

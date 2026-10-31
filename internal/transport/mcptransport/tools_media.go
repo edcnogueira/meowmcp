@@ -25,11 +25,14 @@ type mediaOutput struct {
 	ChatJID            string `json:"chat_jid"`
 	MediaType          string `json:"media_type"`
 	MimeType           string `json:"mime_type"`
+	ViewOnce           bool   `json:"view_once,omitempty" jsonschema:"view-once media, returned from the copy stored when it arrived"`
 	FilePath           string `json:"file_path" jsonschema:"local copy of the attachment on the server host"`
 	SizeBytes          int64  `json:"size_bytes"`
 	Caption            string `json:"caption,omitempty" jsonschema:"caption or file name sent with the media"`
 	Transcript         string `json:"transcript,omitempty" jsonschema:"speech-to-text of voice/audio"`
+	TranscriptUnclear  bool   `json:"transcript_unclear,omitempty" jsonschema:"speech-to-text had low confidence: treat the transcript as unreliable and do not complete or guess words"`
 	TranscriptionError string `json:"transcription_error,omitempty" jsonschema:"why audio has no transcript"`
+	MarkedRead         bool   `json:"marked_read" jsonschema:"always false: fetching media never sends read receipts"`
 	Note               string `json:"note,omitempty"`
 }
 
@@ -43,10 +46,12 @@ func (t *Transport) getMedia(ctx context.Context, _ *mcp.CallToolRequest, in get
 		ChatJID:            resp.Message.ChatJID,
 		MediaType:          resp.Message.MediaType,
 		MimeType:           resp.MimeType,
+		ViewOnce:           resp.Message.ViewOnce,
 		FilePath:           resp.Path,
 		SizeBytes:          resp.Size,
 		Caption:            resp.Message.Text,
 		Transcript:         resp.Transcript,
+		TranscriptUnclear:  resp.TranscriptUnclear,
 		TranscriptionError: resp.TranscriptionError,
 	}
 

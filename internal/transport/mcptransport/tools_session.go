@@ -57,7 +57,7 @@ func (t *Transport) getStatus(_ context.Context, _ *mcp.CallToolRequest, _ empty
 			path = p
 		}
 	}
-	return nil, toStatusOutput(st, path), nil
+	return nil, toStatusOutput(st, path, t.service.SendApprovalRequired()), nil
 }
 
 func (t *Transport) login(ctx context.Context, _ *mcp.CallToolRequest, in loginInput) (*mcp.CallToolResult, statusOutput, error) {
@@ -66,14 +66,14 @@ func (t *Transport) login(ctx context.Context, _ *mcp.CallToolRequest, in loginI
 		return nil, statusOutput{}, err
 	}
 	if st.Pairing == nil || st.Pairing.QRCode == "" {
-		return nil, toStatusOutput(st, ""), nil
+		return nil, toStatusOutput(st, "", t.service.SendApprovalRequired()), nil
 	}
 
 	png, path, err := t.renderQR(st.Pairing.QRCode)
 	if err != nil {
 		return nil, statusOutput{}, err
 	}
-	out := toStatusOutput(st, path)
+	out := toStatusOutput(st, path, t.service.SendApprovalRequired())
 
 	summary, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

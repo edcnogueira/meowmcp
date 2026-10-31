@@ -2,6 +2,7 @@ package whatsappprovider
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -10,7 +11,9 @@ import (
 type Content struct {
 	Text      string
 	MediaType string
+	ViewOnce  bool
 	QuotedID  string
+	Mentions  []string
 }
 
 func (c Content) IsEmpty() bool {
@@ -18,6 +21,31 @@ func (c Content) IsEmpty() bool {
 }
 
 func ExtractContent(m *waE2E.Message) Content {
+	c := extractContent(m)
+	c.Mentions = contextInfo(m).GetMentionedJID()
+	c.ViewOnce = m.GetImageMessage().GetViewOnce() || m.GetVideoMessage().GetViewOnce() || m.GetAudioMessage().GetViewOnce()
+	return c
+}
+
+func contextInfo(m *waE2E.Message) *waE2E.ContextInfo {
+	switch {
+	case m.GetExtendedTextMessage() != nil:
+		return m.GetExtendedTextMessage().GetContextInfo()
+	case m.GetImageMessage() != nil:
+		return m.GetImageMessage().GetContextInfo()
+	case m.GetVideoMessage() != nil:
+		return m.GetVideoMessage().GetContextInfo()
+	case m.GetDocumentMessage() != nil:
+		return m.GetDocumentMessage().GetContextInfo()
+	case m.GetAudioMessage() != nil:
+		return m.GetAudioMessage().GetContextInfo()
+	case m.GetStickerMessage() != nil:
+		return m.GetStickerMessage().GetContextInfo()
+	}
+	return nil
+}
+
+func extractContent(m *waE2E.Message) Content {
 	if m == nil {
 		return Content{}
 	}
@@ -112,6 +140,20 @@ func ExtractContent(m *waE2E.Message) Content {
 		return Content{Text: m.GetInteractiveResponseMessage().GetBody().GetText(), QuotedID: m.GetInteractiveResponseMessage().GetContextInfo().GetStanzaID()}
 	}
 	return Content{}
+}
+
+var agentPrefix = regexp.MustCompile(`^\*([\p{L}][\p{L}\p{M}'. -]{0,39}?)(?::\*|\*:)[ \t]*(?:\r?\n)?`)
+
+func SplitAgentName(text string) (agent, rest string, ok bool) {
+	m := agentPrefix.FindStringSubmatchIndex(text)
+	if m == nil {
+		return "", text, false
+	}
+	agent, rest = strings.TrimSpace(text[m[2]:m[3]]), strings.TrimSpace(text[m[1]:])
+	if agent == "" || rest == "" || len(strings.Fields(agent)) > 4 {
+		return "", text, false
+	}
+	return agent, rest, true
 }
 
 func pollOf(m *waE2E.Message) *waE2E.PollCreationMessage {

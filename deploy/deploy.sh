@@ -12,8 +12,10 @@ dir="${MEOWMCP_DEPLOY_DIR:-services/meowmcp}"
 tag="${1:-main}"
 here="$(cd "$(dirname "$0")" && pwd)"
 
-ssh "$host" "mkdir -p ~/$dir"
+ssh "$host" "mkdir -p ~/$dir ~/.hermes/plugins/meowmcp-approval"
 scp -q "$here/compose.yaml" "$host:$dir/compose.yaml"
+scp -q "$here/../integrations/hermes/meowmcp-approval/plugin.yaml" "$here/../integrations/hermes/meowmcp-approval/__init__.py" \
+  "$host:.hermes/plugins/meowmcp-approval/"
 
 ssh "$host" bash -s -- "$dir" "$tag" <<'REMOTE'
 set -euo pipefail
@@ -23,12 +25,13 @@ umask 077
 touch .env
 chmod 600 .env
 
-if ! grep -q '^MEOWMCP_AUTH_TOKEN=.' .env; then
-  sed -i '/^MEOWMCP_AUTH_TOKEN=/d' .env
-  echo "MEOWMCP_AUTH_TOKEN=$(openssl rand -hex 32)" >> .env
-  echo "[deploy] generated MEOWMCP_AUTH_TOKEN in $PWD/.env"
-fi
-token="$(sed -n 's/^MEOWMCP_AUTH_TOKEN=//p' .env)"
+for key in MEOWMCP_AUTH_TOKEN MEOWMCP_SEND_APPROVAL_SECRET; do
+  if ! grep -q "^$key=." .env; then
+    sed -i "/^$key=/d" .env
+    echo "$key=$(openssl rand -hex 32)" >> .env
+    echo "[deploy] generated $key in $PWD/.env"
+  fi
+done
 mkdir -p data
 sed -i '/^MEOWMCP_\(TAG\|DATA_DIR\|UID\|GID\)=/d' .env
 cat >> .env <<EOF
@@ -38,12 +41,18 @@ MEOWMCP_UID=$(id -u)
 MEOWMCP_GID=$(id -g)
 EOF
 
-# Hermes reads ${MEOWMCP_AUTH_TOKEN} from its own .env; keep both in sync.
+# Hermes reads ${MEOWMCP_AUTH_TOKEN} for the MCP connection and MEOWMCP_SEND_APPROVAL_SECRET in the
+# meowmcp-approval plugin from its own .env; keep both in sync.
 hermes_env="$HOME/.hermes/.env"
-if [[ -f "$hermes_env" ]] && ! grep -qx "MEOWMCP_AUTH_TOKEN=$token" "$hermes_env"; then
-  sed -i '/^MEOWMCP_AUTH_TOKEN=/d' "$hermes_env"
-  echo "MEOWMCP_AUTH_TOKEN=$token" >> "$hermes_env"
-  echo "[deploy] wrote MEOWMCP_AUTH_TOKEN to $hermes_env; restart Hermes to load it: systemctl --user restart hermes-gateway"
+if [[ -f "$hermes_env" ]]; then
+  for key in MEOWMCP_AUTH_TOKEN MEOWMCP_SEND_APPROVAL_SECRET; do
+    value="$(sed -n "s/^$key=//p" .env)"
+    if ! grep -qx "$key=$value" "$hermes_env"; then
+      sed -i "/^$key=/d" "$hermes_env"
+      echo "$key=$value" >> "$hermes_env"
+      echo "[deploy] wrote $key to $hermes_env; restart Hermes to load it: systemctl --user restart hermes-gateway"
+    fi
+  done
 fi
 
 echo "[deploy] ghcr.io/edcnogueira/meowmcp:$tag"

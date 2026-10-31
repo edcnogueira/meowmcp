@@ -19,6 +19,7 @@ import (
 	"github.com/edcnogueira/meowmcp/internal/config"
 	"github.com/edcnogueira/meowmcp/internal/logging"
 	"github.com/edcnogueira/meowmcp/internal/providers/sttprovider"
+	"github.com/edcnogueira/meowmcp/internal/providers/webhookprovider"
 	"github.com/edcnogueira/meowmcp/internal/providers/whatsappprovider"
 	"github.com/edcnogueira/meowmcp/internal/repositories/messagesrepo"
 	"github.com/edcnogueira/meowmcp/internal/service/whatsappservice"
@@ -87,23 +88,39 @@ func run(ctx context.Context, cfg config.Config, logger *zap.Logger) error {
 			Language: cfg.STT.Language,
 		})
 	}
-	service := whatsappservice.New(wa, messages, transcriber, filepath.Join(cfg.DataDir, "media"))
+	service := whatsappservice.New(wa, messages, transcriber, whatsappservice.Config{
+		MediaDir:           filepath.Join(cfg.DataDir, "media"),
+		SendApprovalSecret: cfg.SendApprovalSecret,
+	})
 	wa.SetUpdateHandler(service.HandleUpdate)
 	wa.Start(ctx)
 
-	transport := mcptransport.New(service, filepath.Join(cfg.DataDir, "qr.png"), version)
+	transport := mcptransport.New(service, mcptransport.Options{
+		QRImagePath: filepath.Join(cfg.DataDir, "qr.png"),
+		Version:     version,
+		Webhooks:    webhookprovider.New(webhookprovider.Config{AllowPrivate: cfg.EventsAllowPrivateCallback}),
+	})
+	defer transport.Close()
 	logctx.Info(ctx, "meowmcp starting",
 		zap.String("version", version),
 		zap.String("transport", cfg.Transport),
 		zap.String("data_dir", cfg.DataDir),
 		zap.Bool("transcription", transcriber != nil),
+		zap.Bool("send_approval", service.SendApprovalRequired()),
 		zap.String("whatsapp_state", service.Status().State.String()))
+	if !service.SendApprovalRequired() {
+		logctx.Warn(ctx, "send approval is off: any MCP caller can send messages; set MEOWMCP_SEND_APPROVAL_SECRET to require approval tokens")
+	}
 
 	switch cfg.Transport {
 	case config.TransportHTTP:
 		return serveHTTP(ctx, cfg, transport)
 	default:
-		err := transport.Server().Run(ctx, &mcp.StdioTransport{})
+		server, err := transport.Server()
+		if err != nil {
+			return err
+		}
+		err = server.Run(ctx, &mcp.StdioTransport{})
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -112,9 +129,13 @@ func run(ctx context.Context, cfg config.Config, logger *zap.Logger) error {
 }
 
 func serveHTTP(ctx context.Context, cfg config.Config, transport *mcptransport.Transport) error {
+	handler, err := transport.HTTPHandler(cfg.AuthToken)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           transport.HTTPHandler(cfg.AuthToken),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)

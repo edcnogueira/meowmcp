@@ -158,18 +158,46 @@ func (p *Provider) convertMessage(ctx context.Context, cli *whatsmeow.Client, ch
 	} else {
 		senderName = p.contactName(ctx, cli, sender, senderName)
 	}
+	text, agent := c.Text, ""
+	if !e.Info.IsFromMe && p.isBusiness(ctx, cli, sender, e) {
+		if name, rest, ok := SplitAgentName(text); ok {
+			text, agent = rest, name
+		}
+	}
+	mentions := make([]domain.Mention, len(c.Mentions))
+	for i, jid := range c.Mentions {
+		mentions[i] = domain.Mention{JID: jid}
+	}
 	return domain.Message{
 		ID:         e.Info.ID,
 		ChatJID:    chat.String(),
 		SenderJID:  sender.String(),
 		SenderName: senderName,
+		AgentName:  agent,
 		FromMe:     e.Info.IsFromMe,
 		Timestamp:  e.Info.Timestamp,
-		Text:       c.Text,
+		Text:       text,
 		MediaType:  c.MediaType,
+		ViewOnce:   c.ViewOnce || e.IsViewOnce,
 		QuotedID:   c.QuotedID,
+		Mentions:   mentions,
 		MediaRef:   MediaRef(e.Message),
 	}, nil, true
+}
+
+func (p *Provider) isBusiness(ctx context.Context, cli *whatsmeow.Client, sender types.JID, e *events.Message) bool {
+	if e.Info.VerifiedName != nil {
+		return true
+	}
+	if cli.Store.Contacts == nil {
+		return false
+	}
+	for _, candidate := range p.aliasJIDs(ctx, cli, sender) {
+		if ci, err := cli.Store.Contacts.GetContact(ctx, candidate); err == nil && ci.Found && ci.BusinessName != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Provider) handleRename(ctx context.Context, cli *whatsmeow.Client, jid types.JID, fallback string) {

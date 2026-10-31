@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/jamillosantos/logctx"
 	"go.uber.org/zap"
@@ -24,6 +23,7 @@ type WhatsApp interface {
 	ChatAliases(ctx context.Context, jid string) ([]string, error)
 	CheckNumbers(ctx context.Context, phones []string) ([]domain.NumberCheck, error)
 	Contacts(ctx context.Context) ([]domain.Contact, error)
+	DescribeMentions(ctx context.Context, jids []string) map[string]domain.Mention
 	SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error)
 	SendMedia(ctx context.Context, chatJID string, media domain.OutgoingMedia, quoted *domain.Message) (domain.SentMessage, error)
 	MarkRead(ctx context.Context, chatJID string, msgs []domain.Message) error
@@ -39,13 +39,19 @@ type MessagesRepository interface {
 	UpdateMessageText(ctx context.Context, chatJIDs []string, id, text string) error
 	GetMessage(ctx context.Context, chatJIDs []string, id string) (domain.Message, error)
 	GetMedia(ctx context.Context, chatJIDs []string, id string) (domain.Message, error)
-	SetTranscript(ctx context.Context, chatJIDs []string, id, transcript string) error
+	SetTranscript(ctx context.Context, chatJIDs []string, id, transcript string, unclear bool) error
+	SetMediaFile(ctx context.Context, chatJIDs []string, id, path string) error
 	ListMessages(ctx context.Context, req *messagesrepo.ListMessagesRequest) ([]domain.Message, error)
-	LastSentAt(ctx context.Context, chatJIDs []string) (time.Time, error)
+	MaxSeq(ctx context.Context, chatJIDs []string) (int64, error)
 }
 
 type Transcriber interface {
-	Transcribe(ctx context.Context, path string) (string, error)
+	Transcribe(ctx context.Context, path string) (domain.Transcript, error)
+}
+
+type Config struct {
+	MediaDir           string
+	SendApprovalSecret string
 }
 
 type Service struct {
@@ -53,17 +59,23 @@ type Service struct {
 	messages    MessagesRepository
 	transcriber Transcriber
 	mediaDir    string
+	approvals   *approvals
 	broker      *broker
 }
 
-func New(whatsapp WhatsApp, messages MessagesRepository, transcriber Transcriber, mediaDir string) *Service {
+func New(whatsapp WhatsApp, messages MessagesRepository, transcriber Transcriber, cfg Config) *Service {
 	return &Service{
 		whatsapp:    whatsapp,
 		messages:    messages,
 		transcriber: transcriber,
-		mediaDir:    mediaDir,
+		mediaDir:    cfg.MediaDir,
+		approvals:   newApprovals(cfg.SendApprovalSecret),
 		broker:      newBroker(),
 	}
+}
+
+func (s *Service) SendApprovalRequired() bool {
+	return s.approvals != nil
 }
 
 func (s *Service) HandleUpdate(ctx context.Context, u whatsappprovider.Update) {
@@ -90,12 +102,17 @@ func (s *Service) HandleUpdate(ctx context.Context, u whatsappprovider.Update) {
 				zap.String("chat_jid", edit.ChatJID), zap.String("message_id", edit.MessageID), zap.Error(err))
 		}
 	}
-	if u.Live {
-		for _, m := range u.Messages {
-			if !m.FromMe {
-				s.broker.publish(m)
-			}
+	if !u.Live {
+		return
+	}
+	for _, m := range u.Messages {
+		if m.FromMe {
+			continue
 		}
+		if m.ViewOnce && len(m.MediaRef) > 0 {
+			go s.storeViewOnce(ctx, m)
+		}
+		s.broker.publish(m.ChatJID)
 	}
 }
 

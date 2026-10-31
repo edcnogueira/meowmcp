@@ -3,6 +3,7 @@ package whatsappprovider
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -115,6 +116,36 @@ func (p *Provider) Contacts(ctx context.Context) ([]domain.Contact, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].JID < out[j].JID })
 	return out, nil
+}
+
+func (p *Provider) DescribeMentions(ctx context.Context, jids []string) map[string]domain.Mention {
+	cli := p.currentClient()
+	var me []types.JID
+	if id := cli.Store.ID; id != nil {
+		me = append(me, id.ToNonAD())
+	}
+	if lid := cli.Store.GetLID(); !lid.IsEmpty() {
+		me = append(me, lid.ToNonAD())
+	}
+	out := make(map[string]domain.Mention, len(jids))
+	for _, raw := range jids {
+		m := domain.Mention{JID: raw}
+		if jid, err := types.ParseJID(raw); err == nil {
+			jid = jid.ToNonAD()
+			canon := p.canonical(ctx, cli, jid)
+			if canon.Server == types.DefaultUserServer {
+				m.Phone = "+" + canon.User
+			}
+			m.IsMe = slices.Contains(me, jid) || slices.Contains(me, canon)
+			if m.IsMe {
+				m.Name = cli.Store.PushName
+			} else {
+				m.Name = p.contactName(ctx, cli, canon, "")
+			}
+		}
+		out[raw] = m
+	}
+	return out
 }
 
 func (p *Provider) SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error) {

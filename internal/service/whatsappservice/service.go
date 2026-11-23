@@ -27,6 +27,7 @@ type WhatsApp interface {
 	SendText(ctx context.Context, chatJID, text string, quoted *domain.Message) (domain.SentMessage, error)
 	SendMedia(ctx context.Context, chatJID string, media domain.OutgoingMedia, quoted *domain.Message) (domain.SentMessage, error)
 	MarkRead(ctx context.Context, chatJID string, msgs []domain.Message) error
+	DeleteForMe(ctx context.Context, chatJID string, msgs []domain.Message) error
 	DownloadMedia(ctx context.Context, ref []byte, dst *os.File) error
 }
 
@@ -43,6 +44,7 @@ type MessagesRepository interface {
 	SetMediaFile(ctx context.Context, chatJIDs []string, id, path string) error
 	ListMessages(ctx context.Context, req *messagesrepo.ListMessagesRequest) ([]domain.Message, error)
 	MaxSeq(ctx context.Context, chatJIDs []string) (int64, error)
+	DeleteMessages(ctx context.Context, chatJIDs, ids []string) error
 }
 
 type Transcriber interface {

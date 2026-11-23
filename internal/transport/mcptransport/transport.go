@@ -29,6 +29,7 @@ type Service interface {
 	SendFile(ctx context.Context, req *whatsappservice.SendFileRequest) (whatsappservice.SendFileResponse, error)
 	WaitForMessages(ctx context.Context, req *whatsappservice.WaitForMessagesRequest) (whatsappservice.WaitForMessagesResponse, error)
 	MarkRead(ctx context.Context, chat string) (int, error)
+	DeleteForMe(ctx context.Context, req *whatsappservice.DeleteForMeRequest) (whatsappservice.DeleteForMeResponse, error)
 	GetMedia(ctx context.Context, req *whatsappservice.GetMediaRequest) (whatsappservice.GetMediaResponse, error)
 	ResolveChat(ctx context.Context, chat string) (domain.Chat, []string, error)
 	MessagesSince(ctx context.Context, aliases []string, sinceID int64, limit int) ([]domain.Message, error)
@@ -59,6 +60,10 @@ seconds (bots, OTP codes).
 Writing: send_message accepts a phone number with country code or a JID; to start a new conversation just
 send to the phone number. send_file sends photos, videos, audio, voice notes and documents to the same
 recipients, from a file_path on the server host or base64 data. The result echoes exactly what went out.
+
+Deleting: delete_for_me removes specific messages (message_ids) or whole days (dates) of one chat from this
+server and from every device of the user; other participants keep their copies. It cannot be undone:
+confirm with the user exactly which messages or days before calling it.
 
 Safety: messages go out under the user's name. Confirm the recipient and the exact text (or file) with the
 user before calling send_message or send_file. When get_status reports send_approval "required", the server

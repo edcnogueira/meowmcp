@@ -27,7 +27,7 @@ func (r *Repository) SaveMessages(ctx context.Context, msgs []domain.Message) er
 
 	msgStmt, err := tx.PrepareContext(ctx, `
 INSERT INTO messages (chat_jid, id, sender_jid, sender_name, agent_name, from_me, timestamp, text, media_type, view_once, quoted_id, mentions, media_ref, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT IFNULL(MAX(seq), 0) + 1 FROM messages))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT last + 1 FROM message_seq))
 ON CONFLICT (chat_jid, id) DO UPDATE SET
 	sender_name = CASE WHEN excluded.sender_name <> '' THEN excluded.sender_name ELSE messages.sender_name END,
 	agent_name = excluded.agent_name,
@@ -73,6 +73,18 @@ func (r *Repository) UpdateMessageText(ctx context.Context, chatJIDs []string, i
 	_, err := r.db.ExecContext(ctx, `UPDATE messages SET text = ? WHERE chat_jid IN (`+placeholders(len(chatJIDs))+`) AND id = ?`, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update message %s: %w", id, err)
+	}
+	return nil
+}
+
+func (r *Repository) DeleteMessages(ctx context.Context, chatJIDs, ids []string) error {
+	if len(chatJIDs) == 0 || len(ids) == 0 {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM messages WHERE chat_jid IN (`+placeholders(len(chatJIDs))+`) AND id IN (`+placeholders(len(ids))+`)`,
+		append(stringsToAny(chatJIDs), stringsToAny(ids)...)...)
+	if err != nil {
+		return fmt.Errorf("failed to delete messages: %w", err)
 	}
 	return nil
 }

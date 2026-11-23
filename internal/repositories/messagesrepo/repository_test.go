@@ -169,6 +169,30 @@ var _ = Describe("Repository", func() {
 		Expect(msgs[1].Seq).To(BeNumerically(">", msgs[0].Seq))
 	})
 
+	It("deletes messages across a chat's aliases and never hands out their seq again", func() {
+		pn, lid := newJID(), gofakeit.Numerify("###############")+"@lid"
+		kept := domain.Message{ID: gofakeit.UUID(), ChatJID: pn, Timestamp: at(-time.Minute), Text: gofakeit.Sentence(3)}
+		gone := domain.Message{ID: gofakeit.UUID(), ChatJID: lid, Timestamp: at(0), Text: gofakeit.Sentence(3)}
+		Expect(repo.SaveMessages(ctx, []domain.Message{kept, gone})).To(Succeed())
+		cursor, err := repo.MaxSeq(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("deleting the newest message")
+		Expect(repo.DeleteMessages(ctx, []string{pn, lid}, []string{gone.ID})).To(Succeed())
+		_, err = repo.GetMessage(ctx, []string{pn, lid}, gone.ID)
+		Expect(err).To(MatchError(domain.ErrMessageNotFound))
+		_, err = repo.GetMessage(ctx, []string{pn, lid}, kept.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("storing a message that arrives afterwards")
+		next := domain.Message{ID: gofakeit.UUID(), ChatJID: pn, Timestamp: at(time.Second), Text: gofakeit.Sentence(3)}
+		Expect(repo.SaveMessages(ctx, []domain.Message{next})).To(Succeed())
+		msgs, err := repo.ListMessages(ctx, &messagesrepo.ListMessagesRequest{Forward: true, AfterSeq: cursor, Limit: 10})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(msgs).To(HaveLen(1))
+		Expect(msgs[0].ID).To(Equal(next.ID))
+	})
+
 	It("reopens an existing database without re-running migrations", func() {
 		jid := newJID()
 		Expect(repo.UpsertChat(ctx, domain.Chat{JID: jid})).To(Succeed())

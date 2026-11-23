@@ -73,6 +73,18 @@ type markAsReadOutput struct {
 	Marked int `json:"marked" jsonschema:"number of incoming messages acknowledged"`
 }
 
+type deleteForMeInput struct {
+	Chat       string   `json:"chat" jsonschema:"chat JID or phone number"`
+	MessageIDs []string `json:"message_ids,omitempty" jsonschema:"IDs of the messages to delete (id from get_messages or search_messages)"`
+	Dates      []string `json:"dates,omitempty" jsonschema:"days to wipe from this chat (YYYY-MM-DD, server time zone): every stored message of each day is deleted"`
+}
+
+type deleteForMeOutput struct {
+	ChatJID  string `json:"chat_jid"`
+	ChatName string `json:"chat_name,omitempty"`
+	Deleted  int    `json:"deleted" jsonschema:"number of messages deleted"`
+}
+
 func (t *Transport) registerWriteTools(server *mcp.Server) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "send_message",
@@ -104,6 +116,14 @@ func (t *Transport) registerWriteTools(server *mcp.Server) {
 		Description: "Send read receipts (blue ticks) for the latest incoming messages of a chat. Only when the user wants the other side to see the messages were read.",
 		Annotations: &mcp.ToolAnnotations{Title: "Mark chat as read", IdempotentHint: true, DestructiveHint: new(false), OpenWorldHint: new(true)},
 	}, t.markAsRead)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "delete_for_me",
+		Description: "Delete messages for the user only (WhatsApp's \"Delete for me\"): specific messages by ID and/or every stored message of given days in one chat. " +
+			"They disappear from this server's history and from all the user's devices; other participants keep their copies. " +
+			"It cannot be undone: confirm with the user exactly which messages or days first.",
+		Annotations: &mcp.ToolAnnotations{Title: "Delete WhatsApp messages for me", IdempotentHint: true, DestructiveHint: new(true), OpenWorldHint: new(true)},
+	}, t.deleteForMe)
 }
 
 func (t *Transport) sendMessage(ctx context.Context, _ *mcp.CallToolRequest, in sendMessageInput) (*mcp.CallToolResult, sendMessageOutput, error) {
@@ -179,4 +199,20 @@ func (t *Transport) markAsRead(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, markAsReadOutput{}, err
 	}
 	return nil, markAsReadOutput{Marked: n}, nil
+}
+
+func (t *Transport) deleteForMe(ctx context.Context, _ *mcp.CallToolRequest, in deleteForMeInput) (*mcp.CallToolResult, deleteForMeOutput, error) {
+	days := make([]time.Time, len(in.Dates))
+	for i, date := range in.Dates {
+		day, err := time.ParseInLocation(time.DateOnly, strings.TrimSpace(date), time.Local)
+		if err != nil {
+			return nil, deleteForMeOutput{}, &inputError{field: "dates", msg: "must be dates like 2026-10-19"}
+		}
+		days[i] = day
+	}
+	resp, err := t.service.DeleteForMe(ctx, &whatsappservice.DeleteForMeRequest{Chat: in.Chat, MessageIDs: in.MessageIDs, Days: days})
+	if err != nil {
+		return nil, deleteForMeOutput{}, err
+	}
+	return nil, deleteForMeOutput{ChatJID: resp.Chat.JID, ChatName: resp.Chat.Name, Deleted: resp.Deleted}, nil
 }

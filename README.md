@@ -30,6 +30,7 @@ side answers — e.g. "book me a dentist appointment" end to end.
 | `send_file` | Sends a photo, video, audio, voice note or any document (with optional caption) from a server-side `file_path` or `data_base64`; optional quote-reply; echoes file name and caption |
 | `wait_for_reply` | Blocks up to 240 s for incoming messages; only for answers expected within seconds (bots, codes) |
 | `mark_as_read` | Sends read receipts for a chat |
+| `delete_for_me` | Deletes specific messages (`message_ids`) or whole days (`dates`) of a chat for you only: gone from the local history and from all your devices, kept by the other participants |
 
 Read-only tools carry `readOnlyHint`. None of them sends read receipts: `get_messages`, `get_chat_state`,
 `get_media` and `wait_for_reply` return `marked_read: false`, and only `mark_as_read` marks anything.

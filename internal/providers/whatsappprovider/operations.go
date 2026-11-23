@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
@@ -255,6 +257,43 @@ func (p *Provider) MarkRead(ctx context.Context, chatJID string, msgs []domain.M
 		}
 	}
 	return nil
+}
+
+func (p *Provider) DeleteForMe(ctx context.Context, chatJID string, msgs []domain.Message) error {
+	cli, err := p.readyClient()
+	if err != nil {
+		return err
+	}
+	chat, err := ParseChatJID(chatJID)
+	if err != nil {
+		return err
+	}
+	if err := cli.SendAppState(ctx, DeleteForMePatch(chat, msgs)); err != nil {
+		return fmt.Errorf("failed to delete messages for me: %w", err)
+	}
+	return nil
+}
+
+func DeleteForMePatch(chat types.JID, msgs []domain.Message) appstate.PatchInfo {
+	mutations := make([]appstate.MutationInfo, len(msgs))
+	for i, m := range msgs {
+		fromMe, sender := "0", "0"
+		switch {
+		case m.FromMe:
+			fromMe = "1"
+		case chat.Server == types.GroupServer && m.SenderJID != "":
+			sender = m.SenderJID
+		}
+		mutations[i] = appstate.MutationInfo{
+			Index:   []string{appstate.IndexDeleteMessageForMe, chat.String(), m.ID, fromMe, sender},
+			Version: 3,
+			Value: &waSyncAction.SyncActionValue{DeleteMessageForMeAction: &waSyncAction.DeleteMessageForMeAction{
+				DeleteMedia:      proto.Bool(true),
+				MessageTimestamp: proto.Int64(m.Timestamp.Unix()),
+			}},
+		}
+	}
+	return appstate.PatchInfo{Type: appstate.WAPatchRegularHigh, Mutations: mutations}
 }
 
 func firstNonEmpty(values ...string) string {

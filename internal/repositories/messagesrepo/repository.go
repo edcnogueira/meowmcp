@@ -40,6 +40,11 @@ var migrations = []string{
 	ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0;
 	UPDATE messages SET seq = rowid;
 	CREATE UNIQUE INDEX messages_seq ON messages (seq);`,
+	`CREATE TABLE message_seq (last INTEGER NOT NULL);
+	INSERT INTO message_seq SELECT IFNULL(MAX(seq), 0) FROM messages;
+	CREATE TRIGGER messages_seq_advance AFTER INSERT ON messages BEGIN
+		UPDATE message_seq SET last = NEW.seq;
+	END;`,
 }
 
 type Repository struct {
